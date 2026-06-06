@@ -33,6 +33,7 @@ DRAFTS_FIELDS = [
     "email_subject",
     "email_body",
     "linkedin_note",
+    "linkedin_followup",   # message sent after connection is accepted
     "language",
     "personalization_notes",
 ]
@@ -49,8 +50,9 @@ Met vriendelijke groet,
 {sender}"""
 
 MOCK_LINKEDIN_NL = "Hallo {name}, ik volg de duurzaamheidsinitiatieven van {company} en zie veel raakvlakken met ons educatief platform. Graag even sparren!"
+MOCK_LINKEDIN_FOLLOWUP_NL = "Hallo {name}, dank voor het connecten! Ik ben benieuwd hoe jullie medewerkers worden betrokken bij de duurzaamheidsdoelen van {company}. Heb je 15 minuten voor een kort gesprek?"
 
-MOCK_EMAIL_EN = """Subject: Accelerating sustainability goals through employee education
+MOCK_EMAIL_EN ="""Subject: Accelerating sustainability goals through employee education
 
 Hi {name},
 
@@ -62,6 +64,7 @@ Best regards,
 {sender}"""
 
 MOCK_LINKEDIN_EN = "Hi {name}, I've been following {company}'s sustainability initiatives and see strong alignment with our educational platform. Would love to connect!"
+MOCK_LINKEDIN_FOLLOWUP_EN = "Hi {name}, thanks for connecting! I'm curious how {company} engages employees in its sustainability goals. Would you have 15 minutes for a brief chat?"
 
 
 # ---------------------------------------------------------------------------
@@ -98,82 +101,113 @@ def generate_email_draft(
             )
             subject = f"Duurzaamheidsdoelen versnellen via medewerkersopleiding | {company_name}"
             linkedin = MOCK_LINKEDIN_NL.format(name=first_name, company=company_name)
+            followup = MOCK_LINKEDIN_FOLLOWUP_NL.format(name=first_name, company=company_name)
         else:
             body = MOCK_EMAIL_EN.format(
                 name=first_name, company=company_name, sender=sender_name
             )
             subject = f"Accelerating sustainability goals via employee education | {company_name}"
             linkedin = MOCK_LINKEDIN_EN.format(name=first_name, company=company_name)
+            followup = MOCK_LINKEDIN_FOLLOWUP_EN.format(name=first_name, company=company_name)
         return {
             "email_subject": subject,
             "email_body": body,
             "linkedin_note": linkedin,
+            "linkedin_followup": followup,
             "personalization_notes": "[DRY-RUN] Mock draft",
         }
 
     client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
 
     if language == "nl":
-        prompt = f"""Je bent een B2B sales expert die warme, persoonlijke outreach e-mails schrijft in het Nederlands.
+        prompt = f"""Je bent een B2B outreach expert voor School of Recycling (SoR), een digitaal educatieplatform over afval en recycling.
 
-CONTEXT:
-- Afzender: {sender_name} van {sender_company}
-- Product/dienst: {product_desc}
-- Ontvanger: {first_name} {contact_name.split()[-1] if len(contact_name.split()) > 1 else ''}, {contact_title} bij {company_name}
+WAT WIJ BIEDEN:
+- Organisatielicentie voor bedrijven: medewerkers leren hoe afvalsystemen écht werken (plastic, recycling, materiaalketens)
+- Online cursussen, systeem-gebaseerd, geen greenwashing — feiten en inzicht
+- Ideaal voor CSR/ESG teams, duurzaamheidsprogramma's, medewerkerseducatie
+- Website: schoolofrecycling.com
+
+AFZENDER: {sender_name}, {sender_company}
+
+ONTVANGER: {first_name} ({contact_title}) bij {company_name}
 
 CSR RAPPORT ANALYSE van {company_name}:
 - Samenvatting: {analysis_summary}
 - Sleutelcitaten: {key_quotes}
-- Noemt onderwijs/opleidingen: {mentions_edu}
-- Noemt plasticreductie: {mentions_plastic}
-- Duurzaamheid als kernthema: {mentions_sus}
+- Noemt educatie/opleidingen: {mentions_edu}
+- Noemt plasticreductie/afval: {mentions_plastic}
+- Duurzaamheid kernthema: {mentions_sus}
 
-SCHRIJF:
-1. Een korte, warme cold outreach e-mail in het Nederlands (max 4 zinnen in de bodytekst, exclusief aanhef en afsluiting)
-   - Verwijs specifiek naar een duurzaamheidsdoel of initiatief van {company_name}
-   - Verbind dit aan hoe ons platform kan helpen
-   - Eindig met een zachte call-to-action (bijv. "Zou je openstaan voor een gesprek van 15 minuten?")
-   - Geen buzz words, niet salesy, oprecht en menselijk
+SCHRIJF (in het Nederlands):
 
-2. Een LinkedIn connectieverzoek bericht (MAXIMAAL 300 tekens, inclusief spaties)
+1. Cold outreach e-mail (max 4 zinnen body, exclusief aanhef/afsluiting):
+   - Verwijs naar een specifiek CSR-doel of -citaat van {company_name}
+   - Verbind dit aan hoe SoR medewerkers écht afvalinzicht geeft (niet alleen bewustwording)
+   - Zachte CTA: bijv. "Zou je openstaan voor een kennismaking van 15 minuten?"
+   - Oprecht, geen jargon, niet salesy
+
+2. LinkedIn connectieverzoek (EXACT max 300 tekens):
+   - Persoonlijk haakje gebaseerd op hun CSR-werk
+   - Eindig met uitnodiging om te verbinden
+
+3. LinkedIn follow-up bericht (na acceptatie, max 400 tekens):
+   - Dank voor verbinding
+   - Korte relevante vraag over hun aanpak
+   - Geen pitch, echte nieuwsgierigheid
 
 Geef je antwoord in JSON:
 {{
   "email_subject": "<onderwerpregel>",
-  "email_body": "<volledige e-mail inclusief Hallo {first_name},\\n\\n<body>\\n\\nMet vriendelijke groet,\\n{sender_name}\\n{sender_company}>",
-  "linkedin_note": "<linkedin bericht max 300 tekens>",
-  "personalization_notes": "<kort notitie over wat je hebt gepersonaliseerd>"
+  "email_body": "<volledige e-mail: Hallo {first_name},\\n\\n<body>\\n\\nMet vriendelijke groet,\\n{sender_name}\\nSchool of Recycling\\nschoolofrecycling.com>",
+  "linkedin_note": "<max 300 tekens>",
+  "linkedin_followup": "<max 400 tekens, na acceptatie>",
+  "personalization_notes": "<wat is gepersonaliseerd op basis van hun CSR-rapport>"
 }}"""
     else:
-        prompt = f"""You are a B2B sales expert writing warm, personalized outreach emails in English.
+        prompt = f"""You are a B2B outreach expert for School of Recycling (SoR), a digital waste education platform.
 
-CONTEXT:
-- Sender: {sender_name} from {sender_company}
-- Product/service: {product_desc}
-- Recipient: {first_name} ({contact_title}) at {company_name}
+WHAT WE OFFER:
+- Organisation license for companies: employees learn how waste systems actually work (plastic, recycling, material flows)
+- Online courses, systems-based, fact-driven — no greenwashing, no slogans
+- Ideal for CSR/ESG teams, sustainability programmes, employee education
+- Website: schoolofrecycling.com
+
+SENDER: {sender_name}, {sender_company}
+
+RECIPIENT: {first_name} ({contact_title}) at {company_name}
 
 CSR REPORT ANALYSIS of {company_name}:
 - Summary: {analysis_summary}
 - Key quotes: {key_quotes}
 - Mentions education/training: {mentions_edu}
-- Mentions plastic reduction: {mentions_plastic}
+- Mentions plastic reduction/waste: {mentions_plastic}
 - Sustainability as core theme: {mentions_sus}
 
-WRITE:
-1. A short, warm cold outreach email in English (max 4 sentences in body, excluding greeting and closing)
-   - Reference a specific sustainability goal or initiative from {company_name}
-   - Connect it to how our platform can help
-   - End with a soft call-to-action
-   - No buzzwords, not salesy, genuine and human
+WRITE (in English):
 
-2. A LinkedIn connection request message (MAX 300 characters including spaces)
+1. Cold outreach email (max 4 sentences body, excluding greeting/closing):
+   - Reference a specific CSR goal or quote from {company_name}
+   - Connect it to how SoR gives employees real waste knowledge (not just awareness)
+   - Soft CTA: e.g. "Would you be open to a 15-minute intro call?"
+   - Genuine, no jargon, not salesy
+
+2. LinkedIn connection request (EXACT max 300 characters):
+   - Personal hook based on their CSR work
+   - End with invitation to connect
+
+3. LinkedIn follow-up message (after they accept, max 400 characters):
+   - Thank them for connecting
+   - Short genuine question about their approach
+   - No pitch, real curiosity
 
 Respond in JSON:
 {{
   "email_subject": "<subject line>",
-  "email_body": "<full email including Hi {first_name},\\n\\n<body>\\n\\nBest regards,\\n{sender_name}\\n{sender_company}>",
-  "linkedin_note": "<linkedin message max 300 chars>",
-  "personalization_notes": "<brief note on what you personalized>"
+  "email_body": "<full email: Hi {first_name},\\n\\n<body>\\n\\nBest regards,\\n{sender_name}\\nSchool of Recycling\\nschoolofrecycling.com>",
+  "linkedin_note": "<max 300 chars>",
+  "linkedin_followup": "<max 400 chars, sent after they accept>",
+  "personalization_notes": "<what was personalised based on their CSR report>"
 }}"""
 
     try:
@@ -186,9 +220,10 @@ Respond in JSON:
         json_match = re.search(r"\{.*\}", raw, re.DOTALL)
         if json_match:
             result = json.loads(json_match.group())
-            # Ensure LinkedIn note is <= 300 chars
             if len(result.get("linkedin_note", "")) > 300:
                 result["linkedin_note"] = result["linkedin_note"][:297] + "..."
+            if len(result.get("linkedin_followup", "")) > 400:
+                result["linkedin_followup"] = result["linkedin_followup"][:397] + "..."
             return result
         log.warning("  Could not parse Claude JSON for draft of %s", company_name)
     except Exception as e:
@@ -291,6 +326,7 @@ def run(limit: int | None = None, dry_run: bool = False) -> list[dict]:
             "email_subject": draft.get("email_subject", ""),
             "email_body": draft.get("email_body", ""),
             "linkedin_note": draft.get("linkedin_note", ""),
+            "linkedin_followup": draft.get("linkedin_followup", ""),
             "language": language,
             "personalization_notes": draft.get("personalization_notes", ""),
         }

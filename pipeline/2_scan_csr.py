@@ -234,7 +234,7 @@ Beantwoord de volgende vragen in JSON-formaat:
 1. Wordt **onderwijs** of **opleidingen** (voor medewerkers, de samenleving, of in het kader van duurzaamheid) genoemd?
 2. Wordt **duurzaamheid** of **sustainability** als kernthema behandeld?
 3. Wordt **plasticreductie**, **kunststof afval**, of **verpakkingsvermindering** specifiek besproken?
-4. Geef een relevantiescore van 1-10 (10 = sterk relevant voor een educatief platform dat bedrijven helpt bij het behalen van duurzaamheidsdoelen via medewerkersopleiding).
+4. Geef een relevantiescore van 1-10 voor School of Recycling (schoolofrecycling.com) — een digitaal platform dat bedrijven helpt via medewerkerseducatie over afvalsystemen en plastic. Score hoger als: plastic/verpakking/afval wordt besproken (+3), medewerkersopleiding of educatie wordt besproken (+2), duurzaamheid kernthema is (+1). Score 8-10 = sterke lead.
 5. Geef maximaal 2 korte quotes (max 100 tekens elk) die het meest relevant zijn.
 6. Geef een samenvatting van maximaal 2 zinnen.
 
@@ -277,12 +277,12 @@ def _fallback_analysis(text: str) -> dict:
     mentions_sus = any(k in text_lower for k in sus_keywords)
     mentions_plastic = any(k in text_lower for k in plastic_keywords)
 
-    score = 3
+    score = 2
+    if mentions_plastic:
+        score += 3  # highest weight — core SoR differentiator
     if mentions_edu:
         score += 2
     if mentions_sus:
-        score += 2
-    if mentions_plastic:
         score += 1
 
     return {

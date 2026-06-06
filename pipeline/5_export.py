@@ -58,6 +58,22 @@ LEMLIST_FIELDS = [
     "country",
 ]
 
+# LinkedIn daily queue fields
+LINKEDIN_QUEUE_FIELDS = [
+    "priority",
+    "company_name",
+    "contact_name",
+    "contact_title",
+    "linkedin_url",
+    "connection_note",        # ≤300 chars, ready to paste
+    "char_count",
+    "csr_hook",               # one-line reason why you're reaching out
+    "follow_up_message",      # message to send after they accept
+    "status",                 # blank — fill in manually: sent / accepted / replied
+    "sent_date",              # blank — fill in manually
+    "notes",                  # blank — your personal notes
+]
+
 
 def split_name(full_name: str) -> tuple[str, str]:
     """Split full name into first and last."""
@@ -119,6 +135,77 @@ def export_apollo_csv(contacts: list[dict], drafts: dict, output_path: Path) -> 
         writer.writerows(rows)
 
     log.info("Apollo CSV exported: %d rows to %s", len(rows), output_path)
+    return len(rows)
+
+
+def export_linkedin_queue(
+    contacts: list[dict],
+    drafts: dict,
+    output_path: Path,
+    daily_limit: int = 5,
+) -> int:
+    """
+    Export a prioritised LinkedIn daily queue.
+
+    Contacts are sorted by CSR relevance score (desc). Rows are numbered so
+    you know which 5 to send today, which 5 tomorrow, etc. The connection_note
+    and follow_up_message columns are pre-filled and ready to copy-paste.
+    """
+    rows = []
+    # Sort by relevance score descending so highest-fit contacts come first
+    sorted_contacts = sorted(
+        contacts,
+        key=lambda c: float(c.get("relevance_score", 0) or 0),
+        reverse=True,
+    )
+
+    for i, contact in enumerate(sorted_contacts, start=1):
+        key = (contact.get("company_name", ""), contact.get("contact_email", ""))
+        draft = drafts.get(key, {})
+
+        linkedin_url = contact.get("linkedin_url", "")
+        if not linkedin_url:
+            continue  # skip contacts without a LinkedIn URL
+
+        connection_note = draft.get("linkedin_note", "")
+        follow_up = draft.get("linkedin_followup", "")
+
+        # Truncate connection note hard at 300 chars (LinkedIn limit)
+        if len(connection_note) > 300:
+            connection_note = connection_note[:297] + "..."
+
+        # Build a one-line hook from CSR analysis
+        csr_hook = draft.get("personalization_notes", "")
+        if len(csr_hook) > 120:
+            csr_hook = csr_hook[:117] + "..."
+
+        day_number = ((i - 1) // daily_limit) + 1
+
+        rows.append({
+            "priority": i,
+            "company_name": contact.get("company_name", ""),
+            "contact_name": contact.get("contact_name", ""),
+            "contact_title": contact.get("contact_title", ""),
+            "linkedin_url": linkedin_url,
+            "connection_note": connection_note,
+            "char_count": len(connection_note),
+            "csr_hook": csr_hook,
+            "follow_up_message": follow_up,
+            "status": "",
+            "sent_date": f"Day {day_number}",  # suggested send day
+            "notes": "",
+        })
+
+    output_path.parent.mkdir(exist_ok=True)
+    with open(output_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=LINKEDIN_QUEUE_FIELDS)
+        writer.writeheader()
+        writer.writerows(rows)
+
+    log.info(
+        "LinkedIn queue exported: %d contacts → %s  (%.0f days at %d/day)",
+        len(rows), output_path, len(rows) / daily_limit, daily_limit,
+    )
     return len(rows)
 
 
@@ -294,7 +381,13 @@ def run(limit: int | None = None, dry_run: bool = False) -> dict:
     lemlist_path = config.DATA_DIR / "export_lemlist.csv"
     lemlist_count = export_lemlist_csv(contacts, drafts, lemlist_path)
 
-    # 3. Gmail Drafts
+    # 3. LinkedIn daily queue
+    linkedin_path = config.DATA_DIR / "export_linkedin_queue.csv"
+    linkedin_count = export_linkedin_queue(
+        contacts, drafts, linkedin_path, daily_limit=config.LINKEDIN_DAILY_LIMIT
+    )
+
+    # 4. Gmail Drafts
     gmail_count = export_gmail_drafts(contacts, drafts, dry_run=dry_run)
 
     results = {
@@ -302,12 +395,16 @@ def run(limit: int | None = None, dry_run: bool = False) -> dict:
         "apollo_rows": apollo_count,
         "lemlist_csv": str(lemlist_path),
         "lemlist_rows": lemlist_count,
+        "linkedin_queue_csv": str(linkedin_path),
+        "linkedin_queue_rows": linkedin_count,
         "gmail_drafts_created": gmail_count,
     }
 
     log.info(
-        "Stage 5 complete: Apollo=%d rows, Lemlist=%d rows, Gmail=%d drafts",
-        apollo_count, lemlist_count, gmail_count,
+        "Stage 5 complete: Apollo=%d rows, Lemlist=%d rows, LinkedIn queue=%d contacts (%.0f days), Gmail=%d drafts",
+        apollo_count, lemlist_count, linkedin_count,
+        linkedin_count / max(config.LINKEDIN_DAILY_LIMIT, 1),
+        gmail_count,
     )
     return results
 

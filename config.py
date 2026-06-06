@@ -22,6 +22,7 @@ YOUR_PRODUCT_DESCRIPTION = os.getenv(
     "Educational platform helping companies achieve their sustainability goals through employee education programs",
 )
 RELEVANCE_THRESHOLD = int(os.getenv("RELEVANCE_THRESHOLD", "6"))
+LINKEDIN_DAILY_LIMIT = int(os.getenv("LINKEDIN_DAILY_LIMIT", "5"))
 
 # --- Pipeline settings ---
 DATA_DIR = Path(__file__).parent / "data"
