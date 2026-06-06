@@ -1,0 +1,63 @@
+name: School Outreach
+
+on:
+  schedule:
+    # Mon–Fri at 08:00 Amsterdam time (07:00 UTC)
+    - cron: '0 7 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Run mode'
+        required: true
+        default: 'dry-run'
+        type: choice
+        options:
+          - dry-run
+          - send
+          - replies
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  outreach:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: school-outreach
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/585473727328/locations/global/workloadIdentityPools/github-actions/providers/github
+          service_account: outreach-automation@outreach-june26.iam.gserviceaccount.com
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run outreach
+        run: |
+          MODE="${{ github.event.inputs.mode || 'send' }}"
+          if [ "$MODE" = "send" ]; then
+            node outreach.js --send
+          elif [ "$MODE" = "replies" ]; then
+            node outreach.js --replies
+          else
+            node outreach.js
+          fi
+
+      - name: Upload log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: outreach-log-${{ github.run_id }}
+          path: school-outreach/outreach-log.json
+          if-no-files-found: ignore
