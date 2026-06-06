@@ -1,0 +1,12 @@
+{
+  "name": "grant-scanner",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "scan": "node grant-scanner.js",
+    "write": "node grant-scanner.js --write"
+  },
+  "dependencies": {
+    "googleapis": "^144.0.0"
+  }
+}

@@ -1,0 +1,58 @@
+name: Grant Scanner
+
+on:
+  schedule:
+    # Run every Monday at 08:00 Amsterdam time (07:00 UTC)
+    - cron: '0 7 * * 1'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'scan (preview) or write (update sheet)'
+        required: true
+        default: 'scan'
+        type: choice
+        options:
+          - scan
+          - write
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  scan-grants:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Install dependencies
+        working-directory: grant-scanner
+        run: npm install
+
+      - name: Run grant scanner (preview)
+        if: github.event_name == 'schedule' || github.event.inputs.mode == 'scan'
+        working-directory: grant-scanner
+        run: node grant-scanner.js
+
+      - name: Run grant scanner (write to sheet)
+        if: github.event.inputs.mode == 'write'
+        working-directory: grant-scanner
+        run: node grant-scanner.js --write
+
+      - name: Upload grants JSON
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: grants-found
+          path: grant-scanner/grants-found.json
+          retention-days: 30
