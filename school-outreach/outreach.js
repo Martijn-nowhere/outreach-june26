@@ -4,15 +4,14 @@
  * School of Recycling — Outreach Automation
  *
  * Reads the Tracker sheet, sends E1/E2/E3 emails via Gmail,
- * checks for bounces and warm replies, and updates the sheet.
+ * and updates the sheet. Bounces and replies are managed manually
+ * in the sheet by setting the Status column.
  *
  * Usage:
- *   node outreach.js          — dry run (preview only, no emails sent)
- *   node outreach.js --send   — live run (sends emails, updates sheet)
- *   node outreach.js --replies — scan inbox for warm replies
+ *   node outreach.js        — dry run (preview only, no emails sent)
+ *   node outreach.js --send — live run (sends emails, updates sheet)
  *
- * Auth: uses Application Default Credentials (set by google-github-actions/auth in CI,
- * or GOOGLE_APPLICATION_CREDENTIALS locally pointing to a credential config file).
+ * Auth: uses Application Default Credentials via google-github-actions/auth in CI.
  */
 
 import { readFileSync, writeFileSync, existsSync } from 'fs';
@@ -21,53 +20,30 @@ import { google } from 'googleapis';
 const SPREADSHEET_ID = '1QTCF2nddHm87mDYiRtLBYQKD6j6C1DPC22h2CLENQ1E';
 const SHEET = 'Tracker';
 const DRY_RUN = !process.argv.includes('--send');
-const CHECK_REPLIES = process.argv.includes('--replies');
 const FOLLOW_UP_DAYS = 7;
 const LOG_FILE = './outreach-log.json';
 const SENDER = 'Martijn Huizing <martijn@schoolofrecycling.com>';
-const SENDER_EMAIL = 'martijn@schoolofrecycling.com';
 
 const COL = {
-  ACTION: 0,
   SEND: 1,
-  LANGUAGE: 2,
   SCHOOL: 3,
-  CITY: 4,
-  PROVINCE: 5,
-  COUNTRY: 6,
   EMAIL: 7,
   E1_SENT: 8,
   E2_SENT: 9,
   E3_SENT: 10,
   STATUS: 11,
-  NOTES: 12,
 };
 
 const SKIP_STATUSES = ['done', 'bounced', 'unsubscribe', 'niet geïnteresseerd', 'no', 'stop'];
 
-const WARM_KEYWORDS = [
-  'ja graag', 'ja, graag', 'interesse', 'meer informatie', 'stuur maar',
-  'klinkt goed', 'ja hoor', 'graag meer', 'afspraak', 'gesprek',
-  'yes please', 'interested', 'tell me more', 'sounds good', 'love to',
-  'would like', 'please send', 'yes', 'graag',
-];
-
-async function getSheetsAuth() {
+async function getAuth() {
   const auth = new google.auth.GoogleAuth({
-    scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+    scopes: [
+      'https://www.googleapis.com/auth/gmail.send',
+      'https://www.googleapis.com/auth/spreadsheets',
+    ],
   });
   return auth.getClient();
-}
-
-async function getGmailAuth() {
-  // Domain-wide delegation: impersonate the mailbox owner
-  const auth = new google.auth.GoogleAuth({
-    scopes: ['https://www.googleapis.com/auth/gmail.modify'],
-  });
-  const client = await auth.getClient();
-  // Set subject for impersonation (required for Gmail DWD)
-  client.subject = SENDER_EMAIL;
-  return client;
 }
 
 function sleep(ms) {
@@ -87,7 +63,7 @@ function today() {
 
 function loadLog() {
   if (existsSync(LOG_FILE)) return JSON.parse(readFileSync(LOG_FILE, 'utf8'));
-  return { sent: [], errors: [], warmReplies: [] };
+  return { sent: [], errors: [] };
 }
 
 function saveLog(log) {
@@ -204,63 +180,11 @@ async function updateCell(sheets, rowIndex, colIndex, value) {
   });
 }
 
-async function checkWarmReplies(gmail, log) {
-  console.log('\n=== Scanning for warm replies ===\n');
-  const res = await gmail.users.messages.list({ userId: 'me', labelIds: ['INBOX'], maxResults: 100 });
-  const messages = res.data.messages || [];
-  console.log(`Found ${messages.length} messages to scan`);
-
-  for (const msg of messages) {
-    const full = await gmail.users.messages.get({ userId: 'me', id: msg.id, format: 'full' });
-    const headers = full.data.payload?.headers || [];
-    const from = headers.find(h => h.name === 'From')?.value || '';
-    const subject = headers.find(h => h.name === 'Subject')?.value || '';
-    const snippet = full.data.snippet || '';
-
-    const isWarm = WARM_KEYWORDS.some(kw =>
-      snippet.toLowerCase().includes(kw) || subject.toLowerCase().includes(kw)
-    );
-
-    if (isWarm && !log.warmReplies.find(r => r.messageId === msg.id)) {
-      console.log(`\n🔥 WARM REPLY from: ${from}`);
-      console.log(`   Subject: ${subject}`);
-      console.log(`   Preview: ${snippet.slice(0, 120)}`);
-      log.warmReplies.push({ messageId: msg.id, from, subject, snippet: snippet.slice(0, 200), date: today() });
-    }
-  }
-  console.log('\nWarm reply scan complete.');
-}
-
-async function checkBounces(gmail, sheets, rows, log) {
-  console.log('\n=== Scanning for bounces ===\n');
-  const res = await gmail.users.messages.list({
-    userId: 'me',
-    q: 'from:mailer-daemon OR from:postmaster subject:delivery OR subject:undeliverable',
-    maxResults: 50,
-  });
-  if (!res.data.messages) { console.log('No bounce messages found.'); return; }
-
-  for (const msg of res.data.messages) {
-    const full = await gmail.users.messages.get({ userId: 'me', id: msg.id, format: 'full' });
-    const snippet = full.data.snippet || '';
-
-    for (let i = 0; i < rows.length; i++) {
-      const email = rows[i][COL.EMAIL] || '';
-      const status = (rows[i][COL.STATUS] || '').toLowerCase();
-      if (email && snippet.toLowerCase().includes(email.toLowerCase()) && status !== 'bounced') {
-        console.log(`  Bounce detected for: ${email} (row ${i + 2})`);
-        await updateCell(sheets, i, COL.STATUS, 'Bounced');
-        rows[i][COL.STATUS] = 'Bounced';
-      }
-    }
-  }
-  console.log('Bounce scan complete.');
-}
-
 async function main() {
   const log = loadLog();
-  const gmail = google.gmail({ version: 'v1', auth: await getGmailAuth() });
-  const sheets = google.sheets({ version: 'v4', auth: await getSheetsAuth() });
+  const auth = await getAuth();
+  const gmail = google.gmail({ version: 'v1', auth });
+  const sheets = google.sheets({ version: 'v4', auth });
 
   console.log(`\n=== School of Recycling Outreach Automation ===`);
   console.log(`Mode: ${DRY_RUN ? 'DRY RUN (add --send to actually send)' : 'LIVE'}\n`);
@@ -272,18 +196,6 @@ async function main() {
   });
   const rows = sheetRes.data.valueRanges?.[0]?.values?.slice(1) || [];
   console.log(`Loaded ${rows.length} rows\n`);
-
-  if (CHECK_REPLIES) {
-    await checkWarmReplies(gmail, log);
-    saveLog(log);
-    if (log.warmReplies.length > 0) {
-      console.log(`\n=== Warm Replies Summary ===`);
-      log.warmReplies.forEach(r => console.log(`\nFrom: ${r.from}\nSubject: ${r.subject}\nPreview: ${r.snippet}`));
-    }
-    return;
-  }
-
-  await checkBounces(gmail, sheets, rows, log);
 
   let e1Count = 0, e2Count = 0, e3Count = 0, skipped = 0;
 

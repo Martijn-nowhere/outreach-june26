@@ -14,7 +14,6 @@ on:
         options:
           - dry-run
           - send
-          - replies
 
 permissions:
   contents: read
@@ -48,8 +47,6 @@ jobs:
           MODE="${{ github.event.inputs.mode || 'send' }}"
           if [ "$MODE" = "send" ]; then
             node outreach.js --send
-          elif [ "$MODE" = "replies" ]; then
-            node outreach.js --replies
           else
             node outreach.js
           fi
