@@ -1,0 +1,4 @@
+company_name,website,contact_name,contact_title,contact_email,email_confidence,linkedin_url,contact_source,relevance_score
+Shell Netherlands,https://www.shell.nl,Jan de Vries,Sustainability Manager,j.devries@example.com,pattern,https://www.linkedin.com/in/jandevries,dry-run mock,7
+Eneco,https://www.eneco.nl,Jan de Vries,Sustainability Manager,j.devries@example.com,pattern,https://www.linkedin.com/in/jandevries,dry-run mock,7
+Vattenfall Netherlands,https://www.vattenfall.nl,Jan de Vries,Sustainability Manager,j.devries@example.com,pattern,https://www.linkedin.com/in/jandevries,dry-run mock,7

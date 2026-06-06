@@ -1,0 +1,19 @@
+# Core pipeline dependencies
+anthropic>=0.34.0
+python-dotenv>=1.0.0
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+lxml>=4.9.0
+
+# PDF text extraction
+pdfplumber>=0.10.0
+
+# Google Gmail API (for draft creation)
+google-auth>=2.23.0
+google-auth-oauthlib>=1.1.0
+google-auth-httplib2>=0.1.1
+google-api-python-client>=2.100.0
+
+# Utilities
+tqdm>=4.66.0
+tenacity>=8.2.0

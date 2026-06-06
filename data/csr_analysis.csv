@@ -1,0 +1,4 @@
+company_name,csr_url,mentions_education,mentions_sustainability,mentions_plastic_waste,relevance_score,key_quotes,analysis_summary
+Shell Netherlands,https://www.shell.nl/sustainability (dry-run),True,True,False,7,Wij investeren in de opleiding van medewerkers op het gebied van duurzaamheid.,[DRY-RUN] Mock analysis - company appears relevant based on seed data.
+Eneco,https://www.eneco.nl/sustainability (dry-run),True,True,False,7,Wij investeren in de opleiding van medewerkers op het gebied van duurzaamheid.,[DRY-RUN] Mock analysis - company appears relevant based on seed data.
+Vattenfall Netherlands,https://www.vattenfall.nl/sustainability (dry-run),True,True,False,7,Wij investeren in de opleiding van medewerkers op het gebied van duurzaamheid.,[DRY-RUN] Mock analysis - company appears relevant based on seed data.
