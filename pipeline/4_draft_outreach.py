@@ -92,6 +92,7 @@ def generate_email_draft(
     sender_name = config.YOUR_NAME
     sender_company = config.YOUR_COMPANY
     product_desc = config.YOUR_PRODUCT_DESCRIPTION
+    ownership = contact.get("ownership", "family / private")
 
     if dry_run or not HAS_ANTHROPIC or not config.ANTHROPIC_API_KEY:
         # Return mock drafts
@@ -131,6 +132,9 @@ WAT WIJ BIEDEN:
 AFZENDER: {sender_name}, {sender_company}
 
 ONTVANGER: {first_name} ({contact_title}) bij {company_name}
+BEDRIJFSTYPE: {ownership} — familiecultuur, korte lijnen, lokale betrokkenheid
+
+TOON-INSTRUCTIE: Dit is een familiebedrijf of founder-geleid bedrijf. Spreek ze aan als mensen die écht iets willen betekenen voor hun omgeving — niet als corporate CSR-managers die een vinkje nodig hebben. Wees menselijk, direct, en concreet.
 
 CSR RAPPORT ANALYSE van {company_name}:
 - Samenvatting: {analysis_summary}
@@ -176,6 +180,9 @@ WHAT WE OFFER:
 SENDER: {sender_name}, {sender_company}
 
 RECIPIENT: {first_name} ({contact_title}) at {company_name}
+COMPANY TYPE: {ownership} — family culture, short decision lines, local community focus
+
+TONE INSTRUCTION: This is a family-owned or founder-led company. Address them as people who genuinely want to do good in their community — not corporate CSR managers ticking boxes. Be human, direct, and specific.
 
 CSR REPORT ANALYSIS of {company_name}:
 - Summary: {analysis_summary}

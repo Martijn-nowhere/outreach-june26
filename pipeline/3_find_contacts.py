@@ -42,6 +42,7 @@ HEADERS = {
 CONTACTS_FIELDS = [
     "company_name",
     "website",
+    "ownership",
     "contact_name",
     "contact_title",
     "contact_email",
@@ -380,6 +381,7 @@ def run(limit: int | None = None, dry_run: bool = False) -> list[dict]:
         name = csr_row["company_name"]
         company_data = companies_map.get(name, {})
         website = company_data.get("website", "")
+        ownership = company_data.get("ownership", "family / private")
         domain = get_domain(website) if website else ""
 
         log.info("[%d/%d] Finding contacts for: %s", i, len(relevant), name)
@@ -396,6 +398,7 @@ def run(limit: int | None = None, dry_run: bool = False) -> list[dict]:
                 row = {
                     "company_name": name,
                     "website": website,
+                    "ownership": ownership,
                     "relevance_score": csr_row.get("relevance_score", ""),
                     **mock,
                 }
@@ -469,6 +472,7 @@ def run(limit: int | None = None, dry_run: bool = False) -> list[dict]:
             row = {
                 "company_name": name,
                 "website": website,
+                "ownership": ownership,
                 "relevance_score": csr_row.get("relevance_score", ""),
                 "contact_name": contact.get("contact_name", ""),
                 "contact_title": contact.get("contact_title", ""),

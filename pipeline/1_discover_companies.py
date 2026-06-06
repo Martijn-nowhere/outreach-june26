@@ -21,139 +21,156 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Curated seed list of 100 real Dutch mid-to-large companies
+# Curated list of Dutch family-owned / founder-led mid-sized companies.
+# Selection criteria:
+#   - NOT stock-market listed (or founder still controls majority)
+#   - Dutch roots, often regional HQ, community-oriented culture
+#   - Mid-sized (roughly 100–2000 employees) — fast decision-making
+#   - Industries with natural plastic/waste/sustainability exposure
 # ---------------------------------------------------------------------------
 SEED_COMPANIES = [
-    # Energy & Utilities
-    {"company_name": "Shell Netherlands", "website": "https://www.shell.nl", "industry": "Energy"},
-    {"company_name": "Eneco", "website": "https://www.eneco.nl", "industry": "Energy"},
-    {"company_name": "Vattenfall Netherlands", "website": "https://www.vattenfall.nl", "industry": "Energy"},
-    {"company_name": "TenneT", "website": "https://www.tennet.eu", "industry": "Energy / Grid"},
-    {"company_name": "Urenco", "website": "https://www.urenco.com", "industry": "Nuclear Energy"},
-    {"company_name": "OCI N.V.", "website": "https://www.oci.nl", "industry": "Chemicals / Fertilizers"},
-    # Chemicals & Materials
-    {"company_name": "AkzoNobel", "website": "https://www.akzonobel.com", "industry": "Paints & Coatings"},
-    {"company_name": "DSM-Firmenich", "website": "https://www.dsm-firmenich.com", "industry": "Life Sciences / Nutrition"},
-    {"company_name": "Corbion", "website": "https://www.corbion.com", "industry": "Biobased Chemicals"},
-    {"company_name": "Covestro Netherlands", "website": "https://www.covestro.com", "industry": "Polymers"},
-    {"company_name": "LyondellBasell Netherlands", "website": "https://www.lyondellbasell.com", "industry": "Petrochemicals"},
-    {"company_name": "DOW Benelux", "website": "https://www.dow.com", "industry": "Specialty Chemicals"},
-    {"company_name": "Perstorp Netherlands", "website": "https://www.perstorp.com", "industry": "Specialty Chemicals"},
-    {"company_name": "Renewi", "website": "https://www.renewi.com", "industry": "Waste Management"},
-    # Food & Agriculture
-    {"company_name": "Heineken", "website": "https://www.heineken.com", "industry": "Beverages"},
-    {"company_name": "Unilever Netherlands", "website": "https://www.unilever.nl", "industry": "FMCG"},
-    {"company_name": "FrieslandCampina", "website": "https://www.frieslandcampina.com", "industry": "Dairy"},
-    {"company_name": "Wessanen", "website": "https://www.wessanen.com", "industry": "Organic Food"},
-    {"company_name": "Royal FloraHolland", "website": "https://www.royalfloraholland.com", "industry": "Horticulture"},
-    {"company_name": "Albert Heijn", "website": "https://www.ah.nl", "industry": "Retail / Grocery"},
-    {"company_name": "Ahold Delhaize", "website": "https://www.aholddelhaize.com", "industry": "Retail / Grocery"},
-    {"company_name": "Jumbo Supermarkten", "website": "https://www.jumbo.com", "industry": "Retail / Grocery"},
-    # Technology & IT
-    {"company_name": "Philips", "website": "https://www.philips.nl", "industry": "Technology / Healthcare"},
-    {"company_name": "ASML", "website": "https://www.asml.com", "industry": "Semiconductor Equipment"},
-    {"company_name": "TomTom", "website": "https://www.tomtom.com", "industry": "Navigation Technology"},
-    {"company_name": "Exact Software", "website": "https://www.exact.com", "industry": "Business Software"},
-    {"company_name": "AFAS Software", "website": "https://www.afas.nl", "industry": "Business Software"},
-    {"company_name": "Nedap", "website": "https://www.nedap.com", "industry": "Technology"},
-    {"company_name": "Adyen", "website": "https://www.adyen.com", "industry": "Fintech / Payments"},
-    {"company_name": "Booking.com", "website": "https://www.booking.com", "industry": "Travel Technology"},
-    {"company_name": "Coolblue", "website": "https://www.coolblue.nl", "industry": "E-commerce / Electronics"},
-    {"company_name": "Bol.com", "website": "https://www.bol.com", "industry": "E-commerce"},
-    # Consulting & Professional Services
-    {"company_name": "Capgemini Netherlands", "website": "https://www.capgemini.com/nl-nl", "industry": "IT Consulting"},
-    {"company_name": "Atos Netherlands", "website": "https://atos.net/nl", "industry": "IT Services"},
-    {"company_name": "CGI Netherlands", "website": "https://www.cgi.com/nl/nl", "industry": "IT Services"},
-    {"company_name": "Accenture Netherlands", "website": "https://www.accenture.com/nl-nl", "industry": "Management Consulting"},
-    {"company_name": "Deloitte Netherlands", "website": "https://www2.deloitte.com/nl", "industry": "Professional Services"},
-    {"company_name": "PwC Netherlands", "website": "https://www.pwc.nl", "industry": "Professional Services"},
-    {"company_name": "KPMG Netherlands", "website": "https://home.kpmg/nl", "industry": "Professional Services"},
-    {"company_name": "EY Netherlands", "website": "https://www.ey.com/nl_nl", "industry": "Professional Services"},
-    {"company_name": "McKinsey Netherlands", "website": "https://www.mckinsey.com/nl", "industry": "Management Consulting"},
-    {"company_name": "BCG Netherlands", "website": "https://www.bcg.com/nl-nl", "industry": "Management Consulting"},
-    {"company_name": "Roland Berger Netherlands", "website": "https://www.rolandberger.com/nl", "industry": "Management Consulting"},
-    {"company_name": "Arcadis", "website": "https://www.arcadis.com/nl", "industry": "Engineering Consulting"},
-    {"company_name": "Ordina", "website": "https://www.ordina.com", "industry": "IT Consulting"},
-    # Finance & Banking
-    {"company_name": "ABN AMRO", "website": "https://www.abnamro.nl", "industry": "Banking"},
-    {"company_name": "ING Bank", "website": "https://www.ing.nl", "industry": "Banking"},
-    {"company_name": "Rabobank", "website": "https://www.rabobank.nl", "industry": "Banking / Cooperative"},
-    {"company_name": "Triodos Bank", "website": "https://www.triodos.nl", "industry": "Sustainable Banking"},
-    {"company_name": "ASN Bank", "website": "https://www.asnbank.nl", "industry": "Sustainable Banking"},
-    {"company_name": "SNS Bank", "website": "https://www.snsbank.nl", "industry": "Retail Banking"},
-    {"company_name": "Bunq", "website": "https://www.bunq.com", "industry": "Neobank / Fintech"},
-    {"company_name": "Aegon Netherlands", "website": "https://www.aegon.nl", "industry": "Insurance / Finance"},
-    {"company_name": "NN Group", "website": "https://www.nn-group.com", "industry": "Insurance / Finance"},
-    {"company_name": "Achmea", "website": "https://www.achmea.nl", "industry": "Insurance"},
-    {"company_name": "Wolters Kluwer", "website": "https://www.wolterskluwer.com/nl-nl", "industry": "Information Services"},
-    # Logistics & Transport
-    {"company_name": "PostNL", "website": "https://www.postnl.nl", "industry": "Postal / Logistics"},
-    {"company_name": "NS (Nederlandse Spoorwegen)", "website": "https://www.ns.nl", "industry": "Public Transport"},
-    {"company_name": "ProRail", "website": "https://www.prorail.nl", "industry": "Rail Infrastructure"},
-    {"company_name": "Schiphol Group", "website": "https://www.schiphol.nl", "industry": "Aviation / Airport"},
-    {"company_name": "Rotterdam Port Authority", "website": "https://www.portofrotterdam.com", "industry": "Port / Logistics"},
-    {"company_name": "Port of Amsterdam", "website": "https://www.portofamsterdam.com", "industry": "Port / Logistics"},
-    {"company_name": "Vopak", "website": "https://www.vopak.com", "industry": "Tank Storage / Logistics"},
-    {"company_name": "Boskalis", "website": "https://www.boskalis.com", "industry": "Marine Services / Dredging"},
-    {"company_name": "Mammoet", "website": "https://www.mammoet.com", "industry": "Heavy Lifting / Transport"},
-    {"company_name": "Fugro", "website": "https://www.fugro.com", "industry": "Geotechnical Services"},
-    {"company_name": "SBM Offshore", "website": "https://www.sbmoffshore.com", "industry": "Offshore Energy"},
-    {"company_name": "Randstad", "website": "https://www.randstad.nl", "industry": "Staffing / HR"},
-    {"company_name": "Connexxion", "website": "https://www.connexxion.nl", "industry": "Public Transport"},
-    {"company_name": "Arriva Netherlands", "website": "https://www.arriva.nl", "industry": "Public Transport"},
-    {"company_name": "Transdev Netherlands", "website": "https://www.transdev.nl", "industry": "Public Transport"},
-    # Construction & Real Estate
-    {"company_name": "BAM Group", "website": "https://www.bam.com/nl", "industry": "Construction"},
-    {"company_name": "Vanderlande", "website": "https://www.vanderlande.com", "industry": "Logistics Automation"},
-    {"company_name": "SHV Holdings", "website": "https://www.shv.nl", "industry": "Diversified / Energy"},
-    # Retail & Consumer
-    {"company_name": "Rituals Cosmetics", "website": "https://www.rituals.com", "industry": "Beauty / Retail"},
-    {"company_name": "HEMA", "website": "https://www.hema.nl", "industry": "Retail"},
-    {"company_name": "Action", "website": "https://www.action.com/nl-nl", "industry": "Discount Retail"},
-    {"company_name": "Makro Netherlands", "website": "https://www.makro.nl", "industry": "Wholesale / Retail"},
-    {"company_name": "IKEA Netherlands", "website": "https://www.ikea.com/nl", "industry": "Furniture / Retail"},
-    {"company_name": "H&M Netherlands", "website": "https://www.hm.com/nl", "industry": "Fashion Retail"},
-    {"company_name": "Zara Netherlands", "website": "https://www.zara.com/nl", "industry": "Fashion Retail"},
-    # Telecoms & Media
-    {"company_name": "KPN", "website": "https://www.kpn.com", "industry": "Telecommunications"},
-    {"company_name": "Tele2 Netherlands", "website": "https://www.tele2.nl", "industry": "Telecommunications"},
-    {"company_name": "VodafoneZiggo", "website": "https://www.vodafone.nl", "industry": "Telecommunications"},
-    # Healthcare & Life Sciences
-    {"company_name": "Siemens Healthineers NL", "website": "https://www.siemens-healthineers.com/nl", "industry": "Medical Technology"},
-    {"company_name": "Johnson Controls Netherlands", "website": "https://www.johnsoncontrols.com/nl", "industry": "Building Technology"},
-    # Industrial & Engineering
-    {"company_name": "Siemens Netherlands", "website": "https://new.siemens.com/nl", "industry": "Industrial Technology"},
-    {"company_name": "ABB Netherlands", "website": "https://new.abb.com/nl", "industry": "Electrification / Automation"},
-    {"company_name": "Schneider Electric NL", "website": "https://www.se.com/nl", "industry": "Energy Management"},
-    {"company_name": "Honeywell Netherlands", "website": "https://www.honeywell.com/nl-nl", "industry": "Industrial Technology"},
-    {"company_name": "Daikin Netherlands", "website": "https://www.daikin.nl", "industry": "HVAC / Climate Systems"},
-    {"company_name": "GrandVision Netherlands", "website": "https://www.grandvision.com/nl", "industry": "Optical Retail"},
-    # Additional notable companies
-    {"company_name": "Polimoon", "website": "https://www.polimoon.com", "industry": "Plastic Packaging"},
-    {"company_name": "Imtech", "website": "https://www.imtech.nl", "industry": "Technical Services"},
-    {"company_name": "Lidl Netherlands", "website": "https://www.lidl.nl", "industry": "Discount Retail"},
-    {"company_name": "Aldi Netherlands", "website": "https://www.aldi.nl", "industry": "Discount Retail"},
-    {"company_name": "Dirk van den Broek", "website": "https://www.dirk.nl", "industry": "Retail / Grocery"},
-    {"company_name": "Metro Netherlands", "website": "https://www.metro.nl", "industry": "Wholesale / Retail"},
-    {"company_name": "eBay Netherlands", "website": "https://www.ebay.nl", "industry": "E-commerce"},
-    {"company_name": "Amazon Netherlands", "website": "https://www.amazon.nl", "industry": "E-commerce"},
-    {"company_name": "TripAdvisor Netherlands", "website": "https://www.tripadvisor.nl", "industry": "Travel Technology"},
+    # --- Food & Beverage (family-owned / cooperative roots) ---
+    {"company_name": "Jumbo Supermarkten", "website": "https://www.jumbo.com", "industry": "Retail / Grocery", "ownership": "family (Van Eerd)"},
+    {"company_name": "Dirk van den Broek", "website": "https://www.dirk.nl", "industry": "Retail / Grocery", "ownership": "family"},
+    {"company_name": "Sligro Food Group", "website": "https://www.sligro.nl", "industry": "Food Wholesale", "ownership": "family (Slippens)"},
+    {"company_name": "Remia", "website": "https://www.remia.nl", "industry": "Food / Sauces", "ownership": "cooperative"},
+    {"company_name": "Bolletje", "website": "https://www.bolletje.nl", "industry": "Bakery / Food", "ownership": "family"},
+    {"company_name": "Hessing Supervers", "website": "https://www.hessing.nl", "industry": "Fresh Food / Packaging", "ownership": "family"},
+    {"company_name": "Agrifirm", "website": "https://www.agrifirm.nl", "industry": "Agriculture / Feed", "ownership": "cooperative"},
+    {"company_name": "De Heus", "website": "https://www.deheus.com", "industry": "Animal Nutrition", "ownership": "family"},
+    {"company_name": "Vion Food Group", "website": "https://www.vionfoodgroup.com", "industry": "Meat / Food Processing", "ownership": "cooperative"},
+    {"company_name": "Fresca Group", "website": "https://www.fresca.nl", "industry": "Fresh Produce / Packaging", "ownership": "family"},
+    {"company_name": "Verstegen Spices & Sauces", "website": "https://www.verstegen.nl", "industry": "Food / Spices", "ownership": "family"},
+    {"company_name": "Lantmännen Unibake NL", "website": "https://www.lantmannenunibake.nl", "industry": "Bakery / Food", "ownership": "cooperative"},
+
+    # --- Packaging & Plastics (direct relevance to SoR) ---
+    {"company_name": "Lankhorst Mouldings", "website": "https://www.lankhorst-mouldings.com", "industry": "Recycled Plastic Products", "ownership": "family"},
+    {"company_name": "Van Leer Group", "website": "https://www.vanleer.com", "industry": "Industrial Packaging", "ownership": "family (Van Leer)"},
+    {"company_name": "Smurfit Westrock Netherlands", "website": "https://www.smurfitkappa.com/nl", "industry": "Paper Packaging", "ownership": "listed but NL family roots"},
+    {"company_name": "Leer Kunststoffen", "website": "https://www.leerkunststoffen.nl", "industry": "Plastic Packaging", "ownership": "family"},
+    {"company_name": "DPG Packaging", "website": "https://www.dpg-group.nl", "industry": "Plastic / Packaging", "ownership": "family"},
+    {"company_name": "Greiner Packaging NL", "website": "https://www.greiner-packaging.com/nl", "industry": "Plastic Packaging", "ownership": "family (Greiner)"},
+    {"company_name": "Naber Plastics", "website": "https://www.naberplastics.nl", "industry": "Plastic Processing", "ownership": "family"},
+    {"company_name": "Omniform Group", "website": "https://www.omniformgroup.com", "industry": "Packaging / Print", "ownership": "family"},
+
+    # --- Retail & Consumer (Dutch family chains) ---
+    {"company_name": "Hema", "website": "https://www.hema.nl", "industry": "Retail", "ownership": "private equity (Dutch roots)"},
+    {"company_name": "Action", "website": "https://www.action.com/nl-nl", "industry": "Discount Retail", "ownership": "private equity (NL founded)"},
+    {"company_name": "Blokker Holding", "website": "https://www.blokker.nl", "industry": "Retail / Household", "ownership": "family (Blokker)"},
+    {"company_name": "Rituals Cosmetics", "website": "https://www.rituals.com", "industry": "Beauty / Retail", "ownership": "founder-led (Raymond Cloosterman)"},
+    {"company_name": "Scotch & Soda", "website": "https://www.scotch-soda.com", "industry": "Fashion Retail", "ownership": "private / founder roots"},
+    {"company_name": "Shoeby Fashion", "website": "https://www.shoeby.nl", "industry": "Fashion Retail", "ownership": "family"},
+    {"company_name": "America Today", "website": "https://www.americatoday.nl", "industry": "Fashion Retail", "ownership": "family"},
+    {"company_name": "Kwantum", "website": "https://www.kwantum.nl", "industry": "Home Furnishings Retail", "ownership": "family"},
+    {"company_name": "Leen Bakker", "website": "https://www.leenbakker.nl", "industry": "Home Furnishings Retail", "ownership": "family"},
+    {"company_name": "Bristol", "website": "https://www.bristol.nl", "industry": "Footwear Retail", "ownership": "family"},
+
+    # --- Construction & Real Estate (family builders) ---
+    {"company_name": "Dura Vermeer", "website": "https://www.duravermeer.nl", "industry": "Construction", "ownership": "family"},
+    {"company_name": "Heijmans", "website": "https://www.heijmans.nl", "industry": "Construction / Real Estate", "ownership": "listed but founder culture"},
+    {"company_name": "Van Wijnen", "website": "https://www.vanwijnen.nl", "industry": "Construction", "ownership": "family"},
+    {"company_name": "Spie Netherlands", "website": "https://www.spie.com/nl", "industry": "Technical Services", "ownership": "private"},
+    {"company_name": "Strukton", "website": "https://www.strukton.com", "industry": "Construction / Rail", "ownership": "cooperative (Deme Group)"},
+    {"company_name": "Ballast Nedam", "website": "https://www.ballast-nedam.nl", "industry": "Construction", "ownership": "private (BESIX)"},
+    {"company_name": "BPD Bouwfonds", "website": "https://www.bpdeurope.com", "industry": "Real Estate Development", "ownership": "Rabobank subsidiary"},
+    {"company_name": "Volker Wessels", "website": "https://www.volkerwessels.com", "industry": "Construction", "ownership": "family (Wessels)"},
+
+    # --- Healthcare & Pharma (family / foundation owned) ---
+    {"company_name": "Sanquin", "website": "https://www.sanquin.nl", "industry": "Blood Supply / Healthcare", "ownership": "foundation"},
+    {"company_name": "Zorggroep Alliade", "website": "https://www.alliade.nl", "industry": "Healthcare / Care", "ownership": "foundation"},
+    {"company_name": "Pluryn", "website": "https://www.pluryn.nl", "industry": "Care / Education", "ownership": "foundation"},
+    {"company_name": "Meander Medisch Centrum", "website": "https://www.meandermc.nl", "industry": "Hospital / Healthcare", "ownership": "foundation"},
+    {"company_name": "Rijnstate Ziekenhuis", "website": "https://www.rijnstate.nl", "industry": "Hospital / Healthcare", "ownership": "foundation"},
+    {"company_name": "OPG Groep", "website": "https://www.opg.nl", "industry": "Pharmacy / Healthcare", "ownership": "cooperative"},
+    {"company_name": "Brocacef", "website": "https://www.brocacef.nl", "industry": "Pharmaceutical Distribution", "ownership": "cooperative"},
+
+    # --- Agriculture & Horticulture (cooperative / family) ---
+    {"company_name": "Koppert Biological Systems", "website": "https://www.koppert.nl", "industry": "Biological Crop Protection", "ownership": "family (Koppert)"},
+    {"company_name": "Priva", "website": "https://www.priva.com", "industry": "Greenhouse Technology", "ownership": "family"},
+    {"company_name": "Ridder Group", "website": "https://www.ridder.com", "industry": "Horticulture Technology", "ownership": "family"},
+    {"company_name": "Gebr. Smits", "website": "https://www.gebrsmits.nl", "industry": "Horticulture / Flowers", "ownership": "family"},
+    {"company_name": "Nunhems Netherlands", "website": "https://www.nunhems.com", "industry": "Vegetable Seeds", "ownership": "BASF subsidiary"},
+    {"company_name": "Rijk Zwaan", "website": "https://www.rijkzwaan.nl", "industry": "Vegetable Seeds", "ownership": "family"},
+    {"company_name": "Enza Zaden", "website": "https://www.enzazaden.nl", "industry": "Vegetable Seeds", "ownership": "family"},
+    {"company_name": "HilverdaFlorist", "website": "https://www.hilverdaflorist.com", "industry": "Flowers / Horticulture", "ownership": "family"},
+
+    # --- Manufacturing & Industrial (family-owned Dutch makers) ---
+    {"company_name": "Aalberts Industries", "website": "https://www.aalberts.com", "industry": "Industrial Manufacturing", "ownership": "founder roots / listed"},
+    {"company_name": "Damen Shipyards", "website": "https://www.damen.com", "industry": "Shipbuilding", "ownership": "family (Damen)"},
+    {"company_name": "Roto Smeets Group", "website": "https://www.rsg.nl", "industry": "Print / Packaging", "ownership": "family"},
+    {"company_name": "Feenstra", "website": "https://www.feenstra.com", "industry": "HVAC / Technical Services", "ownership": "private"},
+    {"company_name": "Batenburg Techniek", "website": "https://www.batenburg.nl", "industry": "Technical Services", "ownership": "family"},
+    {"company_name": "Nedvang", "website": "https://www.nedvang.nl", "industry": "Packaging Waste / Recycling", "ownership": "industry collective"},
+    {"company_name": "Van Gansewinkel", "website": "https://www.vangansewinkel.nl", "industry": "Waste Management", "ownership": "private"},
+    {"company_name": "Prezero Netherlands", "website": "https://www.prezero.com/nl", "industry": "Waste / Recycling", "ownership": "Schwarz Group"},
+    {"company_name": "Suez Netherlands", "website": "https://www.suez.nl", "industry": "Waste / Water", "ownership": "private"},
+    {"company_name": "Omrin", "website": "https://www.omrin.nl", "industry": "Waste Management", "ownership": "municipal cooperative"},
+
+    # --- Logistics & Distribution (family logistics) ---
+    {"company_name": "Rhenus Logistics Netherlands", "website": "https://www.rhenus.com/nl-nl", "industry": "Logistics", "ownership": "family (Rethmann)"},
+    {"company_name": "Bakker Logistiek", "website": "https://www.bakkerlogistiek.nl", "industry": "Fresh Logistics", "ownership": "family"},
+    {"company_name": "Nabuurs Transport", "website": "https://www.nabuurs.com", "industry": "Transport / Logistics", "ownership": "family"},
+    {"company_name": "Kuehne+Nagel Netherlands", "website": "https://nl.kuehne-nagel.com", "industry": "Freight / Logistics", "ownership": "family (Kuehne)"},
+    {"company_name": "Van der Helm Logistiek", "website": "https://www.vanderhelm.nl", "industry": "Logistics / Waste", "ownership": "family"},
+    {"company_name": "Ewals Cargo Care", "website": "https://www.ewals.com", "industry": "Logistics", "ownership": "family"},
+
+    # --- Technology & Software (Dutch founder-led) ---
+    {"company_name": "AFAS Software", "website": "https://www.afas.nl", "industry": "Business Software", "ownership": "founder-led"},
+    {"company_name": "Coda Group", "website": "https://www.coda.nl", "industry": "Financial Software", "ownership": "founder"},
+    {"company_name": "Ctac", "website": "https://www.ctac.nl", "industry": "IT Consulting", "ownership": "founder roots"},
+    {"company_name": "Cegeka Netherlands", "website": "https://www.cegeka.com/nl", "industry": "IT Services", "ownership": "family (Cegeka)"},
+    {"company_name": "Atos Benelux (local ops)", "website": "https://atos.net/nl", "industry": "IT Services", "ownership": "private"},
+    {"company_name": "Thales Netherlands", "website": "https://www.thalesgroup.com/nl", "industry": "Defence / Technology", "ownership": "listed but local roots"},
+    {"company_name": "Topicus", "website": "https://www.topicus.com", "industry": "Software / Healthcare IT", "ownership": "founder-led"},
+    {"company_name": "Yellowbrick", "website": "https://www.yellowbrick.nl", "industry": "Parking / Mobility Tech", "ownership": "founder-led"},
+
+    # --- Education & Training (aligned with SoR mission) ---
+    {"company_name": "Learnbeat", "website": "https://www.learnbeat.nl", "industry": "EdTech", "ownership": "founder-led"},
+    {"company_name": "Studytube", "website": "https://www.studytube.nl", "industry": "Corporate Learning", "ownership": "founder-led"},
+    {"company_name": "GoodHabitz", "website": "https://www.goodhabitz.com", "industry": "Corporate E-learning", "ownership": "founder-led"},
+    {"company_name": "Springest", "website": "https://www.springest.nl", "industry": "Training Platform", "ownership": "founder (Recruit Holdings)"},
+
+    # --- Sustainability / Circular Economy pioneers ---
+    {"company_name": "Auping", "website": "https://www.auping.nl", "industry": "Sustainable Furniture / Beds", "ownership": "family"},
+    {"company_name": "Tony's Chocolonely", "website": "https://tonyschocolonely.com/nl", "industry": "FMCG / Social Enterprise", "ownership": "founder-led"},
+    {"company_name": "Dopper", "website": "https://www.dopper.com", "industry": "Sustainable Consumer Goods", "ownership": "founder-led"},
+    {"company_name": "Berkel en Rodenrijs (GreenPack)", "website": "https://www.greenpack.eu", "industry": "Reusable Packaging", "ownership": "founder-led"},
+    {"company_name": "Seepje", "website": "https://www.seepje.com", "industry": "Natural Cleaning / FMCG", "ownership": "founder-led"},
+    {"company_name": "Moyee Coffee", "website": "https://www.moyeecoffee.com", "industry": "Fair Trade / FMCG", "ownership": "founder-led"},
+    {"company_name": "Fairphone", "website": "https://www.fairphone.com", "industry": "Sustainable Electronics", "ownership": "social enterprise"},
+    {"company_name": "Circularise", "website": "https://www.circularise.com", "industry": "Circular Economy Tech", "ownership": "founder-led"},
+    {"company_name": "Renewlogy Europe", "website": "https://www.renewlogy.com", "industry": "Plastic-to-Fuel / Recycling", "ownership": "founder-led"},
+    {"company_name": "The Ocean Cleanup NL", "website": "https://theoceancleanup.com", "industry": "Ocean Plastic / NGO", "ownership": "foundation (Boyan Slat)"},
+
+    # --- Events, Hospitality & Tourism (SME with local brand pride) ---
+    {"company_name": "Sunweb Group", "website": "https://www.sunwebgroup.com", "industry": "Travel / Tourism", "ownership": "private"},
+    {"company_name": "Corendon Hotels", "website": "https://www.corendon.nl", "industry": "Hospitality / Travel", "ownership": "founder-led"},
+    {"company_name": "Fletcher Hotels", "website": "https://www.fletcher.nl", "industry": "Hospitality", "ownership": "family"},
+    {"company_name": "Landal GreenParks", "website": "https://www.landal.nl", "industry": "Holiday Parks", "ownership": "Wyndham / NL roots"},
+    {"company_name": "Roompot", "website": "https://www.roompot.nl", "industry": "Holiday Parks", "ownership": "private equity / NL founded"},
+
+    # --- Finance & Insurance (cooperative / foundation) ---
+    {"company_name": "Triodos Bank", "website": "https://www.triodos.nl", "industry": "Sustainable Banking", "ownership": "foundation"},
+    {"company_name": "ASN Bank", "website": "https://www.asnbank.nl", "industry": "Sustainable Banking", "ownership": "foundation (de Volksbank)"},
+    {"company_name": "Achmea", "website": "https://www.achmea.nl", "industry": "Insurance / Cooperative", "ownership": "cooperative"},
+    {"company_name": "OHRA", "website": "https://www.ohra.nl", "industry": "Insurance", "ownership": "Achmea / cooperative roots"},
+    {"company_name": "VGZ Zorgverzekeraar", "website": "https://www.vgz.nl", "industry": "Health Insurance", "ownership": "cooperative"},
 ]
 
 
 def enrich_company(company: dict) -> dict:
-    """Add country and size_estimate fields."""
+    """Add country, size_estimate, and ownership fields."""
     company["country"] = "NL"
-    # Rough size estimate based on industry / known scale
+    company.setdefault("ownership", "family / private")
+    # Rough size estimate based on industry
     large_industries = {
-        "Banking", "Insurance / Finance", "Energy", "Retail / Grocery", "Beverages",
-        "FMCG", "Semiconductor Equipment", "Petrochemicals", "Telecommunications",
-        "Postal / Logistics", "Professional Services",
+        "Retail / Grocery", "Food Wholesale", "Insurance / Cooperative",
+        "Construction", "Logistics", "Pharmaceutical Distribution",
     }
     if company["industry"] in large_industries:
         company["size_estimate"] = "large (>1000 employees)"
     else:
-        company["size_estimate"] = "mid-to-large (250-1000 employees)"
+        company["size_estimate"] = "mid-sized (100-1000 employees)"
     return company
 
 
@@ -161,7 +178,7 @@ def save_companies(companies: list[dict], path: Path, limit: int | None = None) 
     path.parent.mkdir(exist_ok=True)
     if limit:
         companies = companies[:limit]
-    fieldnames = ["company_name", "website", "industry", "size_estimate", "country"]
+    fieldnames = ["company_name", "website", "industry", "ownership", "size_estimate", "country"]
     with open(path, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
