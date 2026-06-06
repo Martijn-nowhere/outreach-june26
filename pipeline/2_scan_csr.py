@@ -46,6 +46,8 @@ CSR_ANALYSIS_FIELDS = [
     "mentions_education",
     "mentions_sustainability",
     "mentions_plastic_waste",
+    "best_angle",
+    "angle_label",
     "relevance_score",
     "key_quotes",
     "analysis_summary",
@@ -219,17 +221,43 @@ KEYWORDS = {
         "packaging", "plastic waste", "waste reduction", "circular", "recyclable",
         "single use", "plastic-free", "recycled material", "waste management",
     ],
-    "education": [
-        # Dutch
-        "opleiding", "opleidingen", "onderwijs", "educatie", "training", "leren",
-        "bewustwording", "kennisdeling", "medewerkersopleiding", "scholing",
-        "cursus", "leerprogramma", "bewust", "kennis", "voorlichting",
+    "employee_education": [
+        # Dutch — internal training angle
+        "medewerkersopleiding", "medewerkers leren", "medewerkerstraining",
+        "interne opleiding", "personeelsontwikkeling", "duurzaamheidstraining",
+        "bewustwording medewerkers", "kennis medewerkers", "scholing personeel",
+        "leertraject", "e-learning", "online cursus", "leerprogramma",
         # English
-        "education", "training", "learning", "awareness", "employee education",
-        "knowledge", "upskilling", "programme", "curriculum",
+        "employee education", "employee training", "staff training",
+        "internal training", "learning programme", "e-learning", "upskilling",
+        "workforce development", "employee awareness",
+    ],
+    "school_sponsorship": [
+        # Dutch — company sponsors schools or educational projects
+        "schoolsponsoring", "onderwijs sponsoring", "sponsoring onderwijs",
+        "steun aan scholen", "educatief programma", "schoolprogramma",
+        "jeugd", "jongeren", "kinderen", "basisschool", "middelbare school",
+        "maatschappelijke betrokkenheid", "lokale gemeenschap", "buurt",
+        "stichting", "fonds", "donatie", "bijdrage aan onderwijs",
+        "sociale impact", "social return", "community",
+        # English
+        "school sponsorship", "educational sponsorship", "youth programme",
+        "children", "schools", "community investment", "social impact",
+        "foundation", "donation", "local community", "giving back",
+    ],
+    "client_gift": [
+        # Dutch — company offers education to clients / customers
+        "klanten", "relaties", "relatiegeschenk", "klantbeleving",
+        "kennisdeling met klanten", "klantprogramma", "klanttevredenheid",
+        "consument", "consumenten", "eindgebruiker", "afnemer",
+        "klantenservice", "loyaliteit", "klantrelatie",
+        # English
+        "clients", "customers", "customer experience", "client programme",
+        "consumer education", "customer loyalty", "value-add", "end user",
+        "client relations", "customer engagement",
     ],
     "sustainability": [
-        # Dutch
+        # Dutch — general sustainability signal (lower weight)
         "duurzaamheid", "duurzaam", "mvo", "maatschappelijk verantwoord",
         "klimaat", "co2", "co₂", "uitstoot", "milieu", "groen", "carbon",
         "netto nul", "net zero", "energietransitie", "fossielvrij",
@@ -259,11 +287,20 @@ def extract_quote(text: str, keyword: str, context_chars: int = 120) -> str:
 def keyword_analysis(text: str) -> dict:
     """
     Scan text for relevant keywords. Free, instant, no API.
-    Scores 1-10 based on signal strength:
-      plastic/waste keywords found  → +3 (core SoR topic)
-      education keywords found      → +2
-      sustainability keywords found → +1
-      bonus for multiple hits       → +1 each category (max +1)
+
+    Detects four SoR sales angles and picks the best fit:
+      employee_education — train own staff on waste/sustainability
+      school_sponsorship — company sponsors schools or youth programmes
+      client_gift        — offer courses to clients/customers
+      custom_course      — strong brand + plastic identity (inferred)
+
+    Scoring (1-10):
+      plastic/waste keywords     → +3 (core topic)
+      employee education signals → +2
+      school sponsorship signals → +2
+      client gift signals        → +1
+      sustainability signals     → +1
+      bonus +1 per category with 3+ distinct hits
     """
     text_lower = text.lower()
     quotes = []
@@ -272,46 +309,82 @@ def keyword_analysis(text: str) -> dict:
     for category, keywords in KEYWORDS.items():
         matched = [kw for kw in keywords if kw in text_lower]
         hits[category] = matched
-
         if matched:
-            # Pull a real quote for the strongest keyword hit
             quote = extract_quote(text, matched[0])
             if quote:
                 quotes.append(quote[:120])
 
     mentions_plastic = bool(hits["plastic_waste"])
-    mentions_edu = bool(hits["education"])
+    mentions_emp_edu = bool(hits["employee_education"])
+    mentions_school = bool(hits["school_sponsorship"])
+    mentions_client = bool(hits["client_gift"])
     mentions_sus = bool(hits["sustainability"])
 
-    # Scoring — weighted for SoR relevance
+    # Combined education signal for backwards-compatible field
+    mentions_edu = mentions_emp_edu or mentions_school
+
+    # Scoring
     score = 1
     if mentions_plastic:
         score += 3
-        if len(hits["plastic_waste"]) >= 3:  # multiple plastic signals = strong lead
+        if len(hits["plastic_waste"]) >= 3:
             score += 1
-    if mentions_edu:
+    if mentions_emp_edu:
         score += 2
-        if len(hits["education"]) >= 3:
+        if len(hits["employee_education"]) >= 3:
             score += 1
+    if mentions_school:
+        score += 2
+        if len(hits["school_sponsorship"]) >= 3:
+            score += 1
+    if mentions_client:
+        score += 1
     if mentions_sus:
         score += 1
     score = min(score, 10)
 
-    # Build summary from actual matched keywords
+    # Determine best sales angle
+    angle_scores = {
+        "employee_education": len(hits["employee_education"]) * 2 + len(hits["plastic_waste"]),
+        "school_sponsorship": len(hits["school_sponsorship"]) * 2,
+        "client_gift":        len(hits["client_gift"]) * 2,
+        "custom_course":      len(hits["plastic_waste"]) * 2 + len(hits["sustainability"]),
+    }
+    best_angle = max(angle_scores, key=lambda k: angle_scores[k])
+    # Only assign an angle if we have at least some signal
+    if angle_scores[best_angle] == 0:
+        best_angle = "none"
+
+    # Human-readable angle labels
+    angle_labels = {
+        "employee_education": "Medewerkerseducatie — train eigen personeel",
+        "school_sponsorship": "Schoolsponsoring — subsidieer cursussen voor scholen",
+        "client_gift":        "Klantgeschenk — bied cursussen aan klanten/relaties",
+        "custom_course":      "Maatwerk cursus — bedrijfsspecifieke afvalcursus",
+        "none":               "Onbekend — nader onderzoek nodig",
+    }
+
+    # Build summary
     signals = []
     if hits["plastic_waste"]:
         signals.append(f"plastic/afval ({', '.join(hits['plastic_waste'][:3])})")
-    if hits["education"]:
-        signals.append(f"educatie ({', '.join(hits['education'][:3])})")
+    if hits["employee_education"]:
+        signals.append(f"medewerkerseducatie ({', '.join(hits['employee_education'][:2])})")
+    if hits["school_sponsorship"]:
+        signals.append(f"schoolsponsoring ({', '.join(hits['school_sponsorship'][:2])})")
+    if hits["client_gift"]:
+        signals.append(f"klantrelaties ({', '.join(hits['client_gift'][:2])})")
     if hits["sustainability"]:
         signals.append(f"duurzaamheid ({', '.join(hits['sustainability'][:2])})")
 
-    summary = f"Gevonden: {' | '.join(signals)}." if signals else "Geen relevante trefwoorden gevonden."
+    summary = f"Beste hoek: {angle_labels[best_angle]}. Gevonden: {' | '.join(signals)}." if signals else "Geen relevante trefwoorden gevonden."
 
     return {
         "mentions_education": mentions_edu,
         "mentions_sustainability": mentions_sus,
         "mentions_plastic_waste": mentions_plastic,
+        "best_angle": best_angle,
+        "angle_label": angle_labels[best_angle],
         "relevance_score": score,
         "key_quotes": " | ".join(quotes[:2]) if quotes else "",
         "analysis_summary": summary,

@@ -31,10 +31,12 @@ DRAFTS_FIELDS = [
     "contact_name",
     "contact_title",
     "contact_email",
+    "best_angle",
+    "angle_label",
     "email_subject",
     "email_body",
     "linkedin_note",
-    "linkedin_followup",   # message sent after connection is accepted
+    "linkedin_followup",
     "language",
     "personalization_notes",
 ]
@@ -86,6 +88,8 @@ def generate_email_draft(
 
     analysis_summary = csr_data.get("analysis_summary", "")
     key_quotes = csr_data.get("key_quotes", "")
+    best_angle = csr_data.get("best_angle", "employee_education")
+    angle_label = csr_data.get("angle_label", "")
     mentions_edu = csr_data.get("mentions_education", "False")
     mentions_plastic = csr_data.get("mentions_plastic_waste", "False")
     mentions_sus = csr_data.get("mentions_sustainability", "False")
@@ -121,21 +125,83 @@ def generate_email_draft(
 
     client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
 
+    # Angle-specific pitch instructions
+    angle_instructions_nl = {
+        "employee_education": (
+            "HOEK: Medewerkerseducatie. Het bedrijf traint eigen personeel op duurzaamheid. "
+            "Pitch: SoR-cursussen geven medewerkers écht inzicht in hoe plastic en afvalsystemen werken — "
+            "geen slogans, maar feiten. Laat ze zelf de verbinding leggen met hun werk."
+        ),
+        "school_sponsorship": (
+            "HOEK: Schoolsponsoring. Het bedrijf investeert in onderwijs of lokale gemeenschap. "
+            "Pitch: {company} kan schoollicenties van SoR sponsoren — scholen krijgen gratis toegang "
+            "tot de cursus Waste Detective: Plastic, en {company} laat zien dat ze investeren in de toekomst. "
+            "Win-win: goed voor scholen, sterk voor het merk."
+        ),
+        "client_gift": (
+            "HOEK: Klantgeschenk / klantprogramma. Het bedrijf heeft een sterke klantrelatie. "
+            "Pitch: geef klanten of relaties toegang tot een SoR-cursus als waardevol, relevant cadeau — "
+            "iets wat echt iets leert in plaats van een fles wijn. Past bij een duurzaam profiel."
+        ),
+        "custom_course": (
+            "HOEK: Maatwerk cursus. Het bedrijf heeft een sterke identiteit rond plastic of afval. "
+            "Pitch: SoR bouwt een bedrijfsspecifieke versie van de cursus — bijvoorbeeld "
+            "'Waste Detective: [Company] Edition' — voor medewerkers, klanten, of scholen. "
+            "Hun verhaal, ons platform."
+        ),
+        "none": (
+            "HOEK: Algemeen duurzaamheid. Gebruik de meest logische hoek op basis van hun profiel."
+        ),
+    }
+    angle_instructions_en = {
+        "employee_education": (
+            "ANGLE: Employee education. The company trains staff on sustainability. "
+            "Pitch: SoR courses give employees real understanding of how plastic and waste systems work — "
+            "facts, not slogans. Let them connect it to their own work."
+        ),
+        "school_sponsorship": (
+            "ANGLE: School sponsorship. The company invests in education or local community. "
+            "Pitch: {company} can sponsor SoR school licences — schools get free access to "
+            "Waste Detective: Plastic, and {company} shows it invests in the next generation. "
+            "Win-win: good for schools, strong for the brand."
+        ),
+        "client_gift": (
+            "ANGLE: Client gift / client programme. The company has strong client relationships. "
+            "Pitch: give clients or relations access to an SoR course as a meaningful, relevant gift — "
+            "something that actually teaches rather than a bottle of wine. Fits a sustainable profile."
+        ),
+        "custom_course": (
+            "ANGLE: Custom course. The company has a strong identity around plastic or waste. "
+            "Pitch: SoR builds a company-specific version of the course — e.g. "
+            "'Waste Detective: [Company] Edition' — for employees, clients, or schools. "
+            "Their story, our platform."
+        ),
+        "none": (
+            "ANGLE: General sustainability. Use the most logical angle based on their profile."
+        ),
+    }
+
+    angle_nl = angle_instructions_nl.get(best_angle, angle_instructions_nl["none"]).format(company=company_name)
+    angle_en = angle_instructions_en.get(best_angle, angle_instructions_en["none"]).format(company=company_name)
+
     if language == "nl":
         prompt = f"""Je bent een B2B outreach expert voor School of Recycling (SoR), een digitaal educatieplatform over afval en recycling.
 
-WAT WIJ BIEDEN:
-- Organisatielicentie voor bedrijven: medewerkers leren hoe afvalsystemen écht werken (plastic, recycling, materiaalketens)
-- Online cursussen, systeem-gebaseerd, geen greenwashing — feiten en inzicht
-- Ideaal voor CSR/ESG teams, duurzaamheidsprogramma's, medewerkerseducatie
-- Website: schoolofrecycling.com
+WAT WIJ BIEDEN (vier mogelijke modellen):
+1. Medewerkerseducatie — organisatielicentie, medewerkers leren hoe afvalsystemen werken
+2. Schoolsponsoring — bedrijf sponsort schoollicenties, scholen krijgen gratis toegang
+3. Klantgeschenk — cursustoegang als cadeau voor klanten of relaties
+4. Maatwerk cursus — bedrijfsspecifieke versie van de cursus (eigen branding/verhaal)
+Website: schoolofrecycling.com
 
 AFZENDER: {sender_name}, {sender_company}
 
 ONTVANGER: {first_name} ({contact_title}) bij {company_name}
 BEDRIJFSTYPE: {ownership} — familiecultuur, korte lijnen, lokale betrokkenheid
 
-TOON-INSTRUCTIE: Dit is een familiebedrijf of founder-geleid bedrijf. Spreek ze aan als mensen die écht iets willen betekenen voor hun omgeving — niet als corporate CSR-managers die een vinkje nodig hebben. Wees menselijk, direct, en concreet.
+TOON-INSTRUCTIE: Familiebedrijf of founder-geleid. Spreek ze aan als mensen die écht iets willen betekenen — niet als corporate CSR-managers. Menselijk, direct, concreet.
+
+{angle_nl}
 
 CSR RAPPORT ANALYSE van {company_name}:
 - Samenvatting: {analysis_summary}
@@ -172,18 +238,21 @@ Geef je antwoord in JSON:
     else:
         prompt = f"""You are a B2B outreach expert for School of Recycling (SoR), a digital waste education platform.
 
-WHAT WE OFFER:
-- Organisation license for companies: employees learn how waste systems actually work (plastic, recycling, material flows)
-- Online courses, systems-based, fact-driven — no greenwashing, no slogans
-- Ideal for CSR/ESG teams, sustainability programmes, employee education
-- Website: schoolofrecycling.com
+WHAT WE OFFER (four models):
+1. Employee education — organisation licence, staff learn how waste systems actually work
+2. School sponsorship — company sponsors school licences, schools get free access
+3. Client gift — course access as a meaningful gift for clients or relations
+4. Custom course — company-specific version of the course (own branding/story)
+Website: schoolofrecycling.com
 
 SENDER: {sender_name}, {sender_company}
 
 RECIPIENT: {first_name} ({contact_title}) at {company_name}
 COMPANY TYPE: {ownership} — family culture, short decision lines, local community focus
 
-TONE INSTRUCTION: This is a family-owned or founder-led company. Address them as people who genuinely want to do good in their community — not corporate CSR managers ticking boxes. Be human, direct, and specific.
+TONE INSTRUCTION: Family-owned or founder-led. Address them as people who genuinely want to do good — not corporate CSR managers ticking boxes. Human, direct, specific.
+
+{angle_en}
 
 CSR REPORT ANALYSIS of {company_name}:
 - Summary: {analysis_summary}
@@ -334,6 +403,8 @@ def run(limit: int | None = None, dry_run: bool = False) -> list[dict]:
             "contact_name": contact_name,
             "contact_title": contact.get("contact_title", ""),
             "contact_email": contact_email,
+            "best_angle": csr_data.get("best_angle", ""),
+            "angle_label": csr_data.get("angle_label", ""),
             "email_subject": draft.get("email_subject", ""),
             "email_body": draft.get("email_body", ""),
             "linkedin_note": draft.get("linkedin_note", ""),
