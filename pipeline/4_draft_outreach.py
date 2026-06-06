@@ -15,6 +15,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 import config
+from pipeline._already_in_talks import ALREADY_IN_TALKS  # noqa: E402
 
 try:
     import anthropic
@@ -301,6 +302,9 @@ def run(limit: int | None = None, dry_run: bool = False) -> list[dict]:
     existing_drafts = load_existing_drafts()
     progress = load_progress()
     language = config.OUTREACH_LANGUAGE
+
+    # Safety filter — never draft for companies already in active talks
+    contacts = [c for c in contacts if c.get("company_name") not in ALREADY_IN_TALKS]
 
     if limit:
         contacts = contacts[:limit]

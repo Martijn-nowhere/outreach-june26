@@ -16,6 +16,7 @@ from bs4 import BeautifulSoup
 # Allow running from project root or pipeline/ dir
 sys.path.insert(0, str(Path(__file__).parent.parent))
 import config
+from pipeline._already_in_talks import ALREADY_IN_TALKS
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
@@ -30,17 +31,13 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 SEED_COMPANIES = [
     # --- Food & Beverage (family-owned / cooperative roots) ---
-    {"company_name": "Jumbo Supermarkten", "website": "https://www.jumbo.com", "industry": "Retail / Grocery", "ownership": "family (Van Eerd)"},
     {"company_name": "Dirk van den Broek", "website": "https://www.dirk.nl", "industry": "Retail / Grocery", "ownership": "family"},
-    {"company_name": "Sligro Food Group", "website": "https://www.sligro.nl", "industry": "Food Wholesale", "ownership": "family (Slippens)"},
-    {"company_name": "Remia", "website": "https://www.remia.nl", "industry": "Food / Sauces", "ownership": "cooperative"},
-    {"company_name": "Bolletje", "website": "https://www.bolletje.nl", "industry": "Bakery / Food", "ownership": "family"},
     {"company_name": "Hessing Supervers", "website": "https://www.hessing.nl", "industry": "Fresh Food / Packaging", "ownership": "family"},
     {"company_name": "Agrifirm", "website": "https://www.agrifirm.nl", "industry": "Agriculture / Feed", "ownership": "cooperative"},
     {"company_name": "De Heus", "website": "https://www.deheus.com", "industry": "Animal Nutrition", "ownership": "family"},
     {"company_name": "Vion Food Group", "website": "https://www.vionfoodgroup.com", "industry": "Meat / Food Processing", "ownership": "cooperative"},
     {"company_name": "Fresca Group", "website": "https://www.fresca.nl", "industry": "Fresh Produce / Packaging", "ownership": "family"},
-    {"company_name": "Verstegen Spices & Sauces", "website": "https://www.verstegen.nl", "industry": "Food / Spices", "ownership": "family"},
+    {"company_name": "Zwanenberg Food Group", "website": "https://www.zwanenberg.nl", "industry": "Food / Meat", "ownership": "family"},
     {"company_name": "Lantmännen Unibake NL", "website": "https://www.lantmannenunibake.nl", "industry": "Bakery / Food", "ownership": "cooperative"},
 
     # --- Packaging & Plastics (direct relevance to SoR) ---
@@ -190,6 +187,14 @@ def save_companies(companies: list[dict], path: Path, limit: int | None = None) 
 def run(limit: int | None = None, dry_run: bool = False) -> list[dict]:
     log.info("Stage 1: Discovering companies (seed list of %d)", len(SEED_COMPANIES))
     companies = [enrich_company(dict(c)) for c in SEED_COMPANIES]
+
+    # Remove any company already in active conversation
+    before = len(companies)
+    companies = [c for c in companies if c["company_name"] not in ALREADY_IN_TALKS]
+    skipped = before - len(companies)
+    if skipped:
+        log.info("Skipped %d companies already in active talks: %s", skipped,
+                 [c["company_name"] for c in SEED_COMPANIES if c["company_name"] in ALREADY_IN_TALKS])
 
     if limit:
         companies = companies[:limit]

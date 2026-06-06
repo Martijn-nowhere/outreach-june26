@@ -20,6 +20,7 @@ from bs4 import BeautifulSoup
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 import config
+from pipeline._already_in_talks import ALREADY_IN_TALKS
 
 try:
     import anthropic
@@ -356,10 +357,11 @@ def run(limit: int | None = None, dry_run: bool = False) -> list[dict]:
 
     companies_map = load_companies()
 
-    # Filter to relevant companies
+    # Filter to relevant companies — exclude any already in active talks
     relevant = [
         r for r in csr_data
         if int(r.get("relevance_score", 0)) >= config.RELEVANCE_THRESHOLD
+        and r.get("company_name") not in ALREADY_IN_TALKS
     ]
     log.info(
         "Found %d relevant companies (score >= %d) out of %d total",
