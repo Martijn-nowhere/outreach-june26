@@ -52,14 +52,22 @@ const WARM_KEYWORDS = [
   'would like', 'please send', 'yes', 'graag',
 ];
 
-async function getAuthClient() {
+async function getSheetsAuth() {
   const auth = new google.auth.GoogleAuth({
-    scopes: [
-      'https://www.googleapis.com/auth/gmail.modify',
-      'https://www.googleapis.com/auth/spreadsheets',
-    ],
+    scopes: ['https://www.googleapis.com/auth/spreadsheets'],
   });
   return auth.getClient();
+}
+
+async function getGmailAuth() {
+  // Domain-wide delegation: impersonate the mailbox owner
+  const auth = new google.auth.GoogleAuth({
+    scopes: ['https://www.googleapis.com/auth/gmail.modify'],
+  });
+  const client = await auth.getClient();
+  // Set subject for impersonation (required for Gmail DWD)
+  client.subject = SENDER_EMAIL;
+  return client;
 }
 
 function sleep(ms) {
@@ -251,9 +259,8 @@ async function checkBounces(gmail, sheets, rows, log) {
 
 async function main() {
   const log = loadLog();
-  const auth = await getAuthClient();
-  const gmail = google.gmail({ version: 'v1', auth });
-  const sheets = google.sheets({ version: 'v4', auth });
+  const gmail = google.gmail({ version: 'v1', auth: await getGmailAuth() });
+  const sheets = google.sheets({ version: 'v4', auth: await getSheetsAuth() });
 
   console.log(`\n=== School of Recycling Outreach Automation ===`);
   console.log(`Mode: ${DRY_RUN ? 'DRY RUN (add --send to actually send)' : 'LIVE'}\n`);
