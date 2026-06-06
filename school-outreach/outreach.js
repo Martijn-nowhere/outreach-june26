@@ -11,7 +11,8 @@
  *   node outreach.js --send   — live run (sends emails, updates sheet)
  *   node outreach.js --replies — scan inbox for warm replies
  *
- * Requires env var: GOOGLE_SERVICE_ACCOUNT_JSON (JSON string of service account key)
+ * Auth: uses Application Default Credentials (set by google-github-actions/auth in CI,
+ * or GOOGLE_APPLICATION_CREDENTIALS locally pointing to a credential config file).
  */
 
 import { readFileSync, writeFileSync, existsSync } from 'fs';
@@ -51,20 +52,14 @@ const WARM_KEYWORDS = [
   'would like', 'please send', 'yes', 'graag',
 ];
 
-function getAuthClient() {
-  const keyJson = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
-  if (!keyJson) throw new Error('GOOGLE_SERVICE_ACCOUNT_JSON env var not set');
-  const key = JSON.parse(keyJson);
-  return new google.auth.JWT({
-    email: key.client_email,
-    key: key.private_key,
+async function getAuthClient() {
+  const auth = new google.auth.GoogleAuth({
     scopes: [
       'https://www.googleapis.com/auth/gmail.modify',
       'https://www.googleapis.com/auth/spreadsheets',
     ],
-    // Domain-wide delegation: impersonate the sender
-    subject: SENDER_EMAIL,
   });
+  return auth.getClient();
 }
 
 function sleep(ms) {
@@ -256,7 +251,7 @@ async function checkBounces(gmail, sheets, rows, log) {
 
 async function main() {
   const log = loadLog();
-  const auth = getAuthClient();
+  const auth = await getAuthClient();
   const gmail = google.gmail({ version: 'v1', auth });
   const sheets = google.sheets({ version: 'v4', auth });
 
