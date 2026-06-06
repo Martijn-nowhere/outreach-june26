@@ -10,10 +10,12 @@
  *   node outreach.js          — dry run (preview only, no emails sent)
  *   node outreach.js --send   — live run (sends emails, updates sheet)
  *   node outreach.js --replies — scan inbox for warm replies
+ *
+ * Requires env var: GOOGLE_SERVICE_ACCOUNT_JSON (JSON string of service account key)
  */
 
-import { execSync } from 'child_process';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { google } from 'googleapis';
 
 const SPREADSHEET_ID = '1QTCF2nddHm87mDYiRtLBYQKD6j6C1DPC22h2CLENQ1E';
 const SHEET = 'Tracker';
@@ -21,10 +23,9 @@ const DRY_RUN = !process.argv.includes('--send');
 const CHECK_REPLIES = process.argv.includes('--replies');
 const FOLLOW_UP_DAYS = 7;
 const LOG_FILE = './outreach-log.json';
+const SENDER = 'Martijn Huizing <martijn@schoolofrecycling.com>';
+const SENDER_EMAIL = 'martijn@schoolofrecycling.com';
 
-// Column indices (0-based) matching sheet headers:
-// Action Today | Send | Language | School | City | Province | Country | Email |
-// E1 Sent | E2 Sent | E3 Sent | Status | Notes
 const COL = {
   ACTION: 0,
   SEND: 1,
@@ -43,7 +44,6 @@ const COL = {
 
 const SKIP_STATUSES = ['done', 'bounced', 'unsubscribe', 'niet geïnteresseerd', 'no', 'stop'];
 
-// Warm reply keywords (Dutch + English)
 const WARM_KEYWORDS = [
   'ja graag', 'ja, graag', 'interesse', 'meer informatie', 'stuur maar',
   'klinkt goed', 'ja hoor', 'graag meer', 'afspraak', 'gesprek',
@@ -51,16 +51,20 @@ const WARM_KEYWORDS = [
   'would like', 'please send', 'yes', 'graag',
 ];
 
-function gws(args) {
-  try {
-    const result = execSync(`gws ${args}`, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
-    return JSON.parse(result);
-  } catch (e) {
-    const stderr = e.stderr || '';
-    const stdout = e.stdout || '';
-    try { return JSON.parse(stdout); } catch {}
-    throw new Error(`gws error: ${stderr || stdout}`);
-  }
+function getAuthClient() {
+  const keyJson = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+  if (!keyJson) throw new Error('GOOGLE_SERVICE_ACCOUNT_JSON env var not set');
+  const key = JSON.parse(keyJson);
+  return new google.auth.JWT({
+    email: key.client_email,
+    key: key.private_key,
+    scopes: [
+      'https://www.googleapis.com/auth/gmail.modify',
+      'https://www.googleapis.com/auth/spreadsheets',
+    ],
+    // Domain-wide delegation: impersonate the sender
+    subject: SENDER_EMAIL,
+  });
 }
 
 function sleep(ms) {
@@ -79,9 +83,7 @@ function today() {
 }
 
 function loadLog() {
-  if (existsSync(LOG_FILE)) {
-    return JSON.parse(readFileSync(LOG_FILE, 'utf8'));
-  }
+  if (existsSync(LOG_FILE)) return JSON.parse(readFileSync(LOG_FILE, 'utf8'));
   return { sent: [], errors: [], warmReplies: [] };
 }
 
@@ -119,7 +121,7 @@ www.schoolofrecycling.com`, school),
 
 Ik stuur even een korte herinnering bij mijn vorige email, voor het geval die is blijven liggen.
 
-Ik begrijp dat docenten het druk hebben, dus ik houd het kort. Waste Detective: Plastic is een volledig online Engelstalig programma's over plastic vervuiling, nu beschikbaar voor leerlingen van 10 tot 16 jaar. Versies voor 17+ komen zeer binnenkort beschikbaar, zodat het programma straks de hele school bedient.
+Ik begrijp dat docenten het druk hebben, dus ik houd het kort. Waste Detective: Plastic is een volledig online Engelstalig programma over plastic vervuiling, nu beschikbaar voor leerlingen van 10 tot 16 jaar. Versies voor 17+ komen zeer binnenkort beschikbaar, zodat het programma straks de hele school bedient.
 
 Ik stuur graag een gratis werkblad mee zodat u alvast een indruk kunt krijgen van de inhoud en kwaliteit, geheel vrijblijvend.
 
@@ -151,33 +153,29 @@ martijn@schoolofrecycling.com
 www.schoolofrecycling.com`, school),
 };
 
-function buildGmailMessage(to, subject, body) {
+function buildRawMessage(to, subject, body) {
   const message = [
     `To: ${to}`,
-    `From: Martijn Huizing <martijn@schoolofrecycling.com>`,
+    `From: ${SENDER}`,
     `Subject: ${subject}`,
     `Content-Type: text/plain; charset=utf-8`,
     ``,
     body,
   ].join('\r\n');
-
   return Buffer.from(message).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
-async function sendEmail(to, subject, body, log) {
-  const raw = buildGmailMessage(to, subject, body);
+async function sendEmail(gmail, to, subject, body, log) {
   if (DRY_RUN) {
     console.log(`  [DRY RUN] Would send to: ${to}`);
     console.log(`  Subject: ${subject}`);
     return true;
   }
   try {
-    const result = gws(`gmail users messages send --params '{"userId":"me"}' --json '{"raw":"${raw"}'`);
-    if (result.error) {
-      console.error(`  ERROR sending to ${to}: ${result.error.message}`);
-      log.errors.push({ to, subject, error: result.error.message, date: today() });
-      return false;
-    }
+    await gmail.users.messages.send({
+      userId: 'me',
+      requestBody: { raw: buildRawMessage(to, subject, body) },
+    });
     log.sent.push({ to, subject, date: today() });
     return true;
   } catch (e) {
@@ -187,8 +185,7 @@ async function sendEmail(to, subject, body, log) {
   }
 }
 
-async function updateCell(rowIndex, colIndex, value) {
-  // rowIndex is 0-based from data array; +2 for header row and 1-based sheet indexing
+async function updateCell(sheets, rowIndex, colIndex, value) {
   const row = rowIndex + 2;
   const col = String.fromCharCode(65 + colIndex);
   const range = `${SHEET}!${col}${row}`;
@@ -196,119 +193,95 @@ async function updateCell(rowIndex, colIndex, value) {
     console.log(`  [DRY RUN] Would update ${range} = "${value}"`);
     return;
   }
-  gws(`sheets spreadsheets values update --params '{"spreadsheetId":"${SPREADSHEET_ID}","range":"${range}","valueInputOption":"RAW"}' --json '{"values":[[${JSON.stringify(value)}]]}'`);
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: SPREADSHEET_ID,
+    range,
+    valueInputOption: 'RAW',
+    requestBody: { values: [[value]] },
+  });
 }
 
-async function checkWarmReplies(log) {
+async function checkWarmReplies(gmail, log) {
   console.log('\n=== Scanning for warm replies ===\n');
-  try {
-    const result = gws(`gmail users messages list --params '{"userId":"me","labelIds":["INBOX"],"maxResults":100}'`);
-    if (result.error) {
-      console.error('Error fetching inbox:', result.error.message);
-      return;
+  const res = await gmail.users.messages.list({ userId: 'me', labelIds: ['INBOX'], maxResults: 100 });
+  const messages = res.data.messages || [];
+  console.log(`Found ${messages.length} messages to scan`);
+
+  for (const msg of messages) {
+    const full = await gmail.users.messages.get({ userId: 'me', id: msg.id, format: 'full' });
+    const headers = full.data.payload?.headers || [];
+    const from = headers.find(h => h.name === 'From')?.value || '';
+    const subject = headers.find(h => h.name === 'Subject')?.value || '';
+    const snippet = full.data.snippet || '';
+
+    const isWarm = WARM_KEYWORDS.some(kw =>
+      snippet.toLowerCase().includes(kw) || subject.toLowerCase().includes(kw)
+    );
+
+    if (isWarm && !log.warmReplies.find(r => r.messageId === msg.id)) {
+      console.log(`\n🔥 WARM REPLY from: ${from}`);
+      console.log(`   Subject: ${subject}`);
+      console.log(`   Preview: ${snippet.slice(0, 120)}`);
+      log.warmReplies.push({ messageId: msg.id, from, subject, snippet: snippet.slice(0, 200), date: today() });
     }
-    const messages = result.messages || [];
-    console.log(`Found ${messages.length} messages to scan`);
-
-    for (const msg of messages) {
-      const full = gws(`gmail users messages get --params '{"userId":"me","id":"${msg.id}","format":"full"}'`);
-      if (full.error) continue;
-
-      const headers = full.payload?.headers || [];
-      const from = headers.find(h => h.name === 'From')?.value || '';
-      const subject = headers.find(h => h.name === 'Subject')?.value || '';
-      const snippet = full.snippet || '';
-
-      const isWarm = WARM_KEYWORDS.some(kw =>
-        snippet.toLowerCase().includes(kw) ||
-        subject.toLowerCase().includes(kw)
-      );
-
-      if (isWarm) {
-        const already = log.warmReplies.find(r => r.messageId === msg.id);
-        if (!already) {
-          console.log(`\n🔥 WARM REPLY from: ${from}`);
-          console.log(`   Subject: ${subject}`);
-          console.log(`   Preview: ${snippet.slice(0, 120)}`);
-          log.warmReplies.push({ messageId: msg.id, from, subject, snippet: snippet.slice(0, 200), date: today() });
-        }
-      }
-    }
-    console.log('\nWarm reply scan complete.');
-  } catch (e) {
-    console.error('Error scanning replies:', e.message);
   }
+  console.log('\nWarm reply scan complete.');
 }
 
-async function checkBounces(rows, log) {
+async function checkBounces(gmail, sheets, rows, log) {
   console.log('\n=== Scanning for bounces ===\n');
-  try {
-    const result = gws(`gmail users messages list --params '{"userId":"me","q":"from:mailer-daemon OR from:postmaster subject:delivery OR subject:undeliverable","maxResults":50}'`);
-    if (result.error || !result.messages) {
-      console.log('No bounce messages found.');
-      return;
-    }
+  const res = await gmail.users.messages.list({
+    userId: 'me',
+    q: 'from:mailer-daemon OR from:postmaster subject:delivery OR subject:undeliverable',
+    maxResults: 50,
+  });
+  if (!res.data.messages) { console.log('No bounce messages found.'); return; }
 
-    for (const msg of result.messages) {
-      const full = gws(`gmail users messages get --params '{"userId":"me","id":"${msg.id}","format":"full"}'`);
-      if (full.error) continue;
-      const snippet = full.snippet || '';
+  for (const msg of res.data.messages) {
+    const full = await gmail.users.messages.get({ userId: 'me', id: msg.id, format: 'full' });
+    const snippet = full.data.snippet || '';
 
-      for (let i = 0; i < rows.length; i++) {
-        const row = rows[i];
-        const email = row[COL.EMAIL] || '';
-        if (email && snippet.toLowerCase().includes(email.toLowerCase())) {
-          const status = row[COL.STATUS] || '';
-          if (status.toLowerCase() !== 'bounced') {
-            console.log(`  Bounce detected for: ${email} (row ${i + 2})`);
-            await updateCell(i, COL.STATUS, 'Bounced');
-            row[COL.STATUS] = 'Bounced';
-          }
-        }
+    for (let i = 0; i < rows.length; i++) {
+      const email = rows[i][COL.EMAIL] || '';
+      const status = (rows[i][COL.STATUS] || '').toLowerCase();
+      if (email && snippet.toLowerCase().includes(email.toLowerCase()) && status !== 'bounced') {
+        console.log(`  Bounce detected for: ${email} (row ${i + 2})`);
+        await updateCell(sheets, i, COL.STATUS, 'Bounced');
+        rows[i][COL.STATUS] = 'Bounced';
       }
     }
-    console.log('Bounce scan complete.');
-  } catch (e) {
-    console.error('Error scanning bounces:', e.message);
   }
+  console.log('Bounce scan complete.');
 }
 
 async function main() {
   const log = loadLog();
+  const auth = getAuthClient();
+  const gmail = google.gmail({ version: 'v1', auth });
+  const sheets = google.sheets({ version: 'v4', auth });
 
   console.log(`\n=== School of Recycling Outreach Automation ===`);
   console.log(`Mode: ${DRY_RUN ? 'DRY RUN (add --send to actually send)' : 'LIVE'}\n`);
 
   console.log('Fetching sheet data...');
-  let sheetData;
-  try {
-    sheetData = gws(`sheets spreadsheets values batchGet --params '{"spreadsheetId":"${SPREADSHEET_ID}","ranges":["${SHEET}"]}'`);
-  } catch (e) {
-    console.error('Failed to fetch sheet:', e.message);
-    process.exit(1);
-  }
-
-  if (sheetData.error) {
-    console.error('Sheet error:', sheetData.error.message);
-    process.exit(1);
-  }
-
-  const rows = sheetData.valueRanges?.[0]?.values?.slice(1) || [];
+  const sheetRes = await sheets.spreadsheets.values.batchGet({
+    spreadsheetId: SPREADSHEET_ID,
+    ranges: [SHEET],
+  });
+  const rows = sheetRes.data.valueRanges?.[0]?.values?.slice(1) || [];
   console.log(`Loaded ${rows.length} rows\n`);
 
   if (CHECK_REPLIES) {
-    await checkWarmReplies(log);
+    await checkWarmReplies(gmail, log);
     saveLog(log);
     if (log.warmReplies.length > 0) {
       console.log(`\n=== Warm Replies Summary ===`);
-      log.warmReplies.forEach(r => {
-        console.log(`\nFrom: ${r.from}\nSubject: ${r.subject}\nPreview: ${r.snippet}`);
-      });
+      log.warmReplies.forEach(r => console.log(`\nFrom: ${r.from}\nSubject: ${r.subject}\nPreview: ${r.snippet}`));
     }
     return;
   }
 
-  await checkBounces(rows, log);
+  await checkBounces(gmail, sheets, rows, log);
 
   let e1Count = 0, e2Count = 0, e3Count = 0, skipped = 0;
 
@@ -325,12 +298,11 @@ async function main() {
     if (!email || !school) { skipped++; continue; }
     if (SKIP_STATUSES.some(s => status.includes(s))) { skipped++; continue; }
 
-    // E1: send flag is "Send" and E1 not yet sent
     if (sendFlag === 'Send' && !e1Sent) {
       console.log(`[E1] ${school} <${email}>`);
-      const sent = await sendEmail(email, TEMPLATES.subject1, TEMPLATES.body1(school), log);
+      const sent = await sendEmail(gmail, email, TEMPLATES.subject1, TEMPLATES.body1(school), log);
       if (sent) {
-        await updateCell(i, COL.E1_SENT, today());
+        await updateCell(sheets, i, COL.E1_SENT, today());
         row[COL.E1_SENT] = today();
         e1Count++;
         await sleep(2000);
@@ -338,12 +310,11 @@ async function main() {
       continue;
     }
 
-    // E2: E1 sent 7+ days ago, E2 not yet sent
     if (e1Sent && !e2Sent && daysSince(e1Sent) >= FOLLOW_UP_DAYS) {
       console.log(`[E2] ${school} <${email}> (E1 sent ${daysSince(e1Sent)} days ago)`);
-      const sent = await sendEmail(email, TEMPLATES.subject2, TEMPLATES.body2(school), log);
+      const sent = await sendEmail(gmail, email, TEMPLATES.subject2, TEMPLATES.body2(school), log);
       if (sent) {
-        await updateCell(i, COL.E2_SENT, today());
+        await updateCell(sheets, i, COL.E2_SENT, today());
         row[COL.E2_SENT] = today();
         e2Count++;
         await sleep(2000);
@@ -351,18 +322,19 @@ async function main() {
       continue;
     }
 
-    // E3: E2 sent 7+ days ago, E3 not yet sent
     if (e2Sent && !e3Sent && daysSince(e2Sent) >= FOLLOW_UP_DAYS) {
       console.log(`[E3] ${school} <${email}> (E2 sent ${daysSince(e2Sent)} days ago)`);
-      const sent = await sendEmail(email, TEMPLATES.subject3, TEMPLATES.body3(school), log);
+      const sent = await sendEmail(gmail, email, TEMPLATES.subject3, TEMPLATES.body3(school), log);
       if (sent) {
-        await updateCell(i, COL.E3_SENT, today());
+        await updateCell(sheets, i, COL.E3_SENT, today());
         row[COL.E3_SENT] = today();
         e3Count++;
         await sleep(2000);
       }
       continue;
     }
+
+    skipped++;
   }
 
   saveLog(log);
@@ -376,4 +348,4 @@ async function main() {
   if (DRY_RUN) console.log(`\nThis was a DRY RUN. Run with --send to actually send emails.`);
 }
 
-main().catch(console.error);
+main().catch(err => { console.error(err); process.exit(1); });
