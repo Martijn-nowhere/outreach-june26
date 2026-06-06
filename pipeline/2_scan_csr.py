@@ -1,7 +1,8 @@
 """
 Stage 2: Scan CSR/MVO reports for each company.
 For each company, finds their CSR report URL, downloads/parses it,
-then uses Claude to analyze for education, sustainability, plastic waste mentions.
+then uses free keyword matching to detect education, sustainability,
+and plastic/waste mentions. No AI API needed — 100% free.
 Saves results to data/csr_analysis.csv
 """
 import sys
@@ -26,12 +27,6 @@ try:
     del _il
 except BaseException:
     HAS_PDFPLUMBER = False
-
-try:
-    import anthropic
-    HAS_ANTHROPIC = True
-except ImportError:
-    HAS_ANTHROPIC = False
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
@@ -210,88 +205,116 @@ def fetch_content(csr_url: str, session: requests.Session) -> tuple[str, str]:
 
 
 # ---------------------------------------------------------------------------
-# Claude analysis
+# Keyword analysis — free, no API needed
 # ---------------------------------------------------------------------------
 
-def analyze_with_claude(company_name: str, text: str, dry_run: bool = False) -> dict:
-    """Use Claude Haiku to analyze CSR text. Returns dict with analysis fields."""
-    if dry_run or not HAS_ANTHROPIC or not config.ANTHROPIC_API_KEY:
-        return MOCK_ANALYSIS.copy()
-
-    client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
-
-    prompt = f"""Je bent een analist die CSR/duurzaamheidsrapporten van Nederlandse bedrijven analyseert.
-
-Analyseer de volgende tekst van het CSR-rapport van **{company_name}** en geef een gestructureerde analyse.
-
-TEKST:
----
-{text[:8000]}
----
-
-Beantwoord de volgende vragen in JSON-formaat:
-
-1. Wordt **onderwijs** of **opleidingen** (voor medewerkers, de samenleving, of in het kader van duurzaamheid) genoemd?
-2. Wordt **duurzaamheid** of **sustainability** als kernthema behandeld?
-3. Wordt **plasticreductie**, **kunststof afval**, of **verpakkingsvermindering** specifiek besproken?
-4. Geef een relevantiescore van 1-10 voor School of Recycling (schoolofrecycling.com) — een digitaal platform dat bedrijven helpt via medewerkerseducatie over afvalsystemen en plastic. Score hoger als: plastic/verpakking/afval wordt besproken (+3), medewerkersopleiding of educatie wordt besproken (+2), duurzaamheid kernthema is (+1). Score 8-10 = sterke lead.
-5. Geef maximaal 2 korte quotes (max 100 tekens elk) die het meest relevant zijn.
-6. Geef een samenvatting van maximaal 2 zinnen.
-
-Antwoord ALLEEN met geldige JSON in dit formaat:
-{{
-  "mentions_education": true/false,
-  "mentions_sustainability": true/false,
-  "mentions_plastic_waste": true/false,
-  "relevance_score": <int 1-10>,
-  "key_quotes": "<quote1> | <quote2>",
-  "analysis_summary": "<2 sentences max>"
-}}"""
-
-    try:
-        msg = client.messages.create(
-            model=config.CLAUDE_MODEL,
-            max_tokens=512,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        raw = msg.content[0].text.strip()
-        # Extract JSON from response (handle potential markdown fences)
-        json_match = re.search(r"\{.*\}", raw, re.DOTALL)
-        if json_match:
-            return json.loads(json_match.group())
-        log.warning("  Could not parse Claude JSON response for %s", company_name)
-        return _fallback_analysis(text)
-    except Exception as e:
-        log.warning("  Claude API error for %s: %s", company_name, e)
-        return _fallback_analysis(text)
+# Keywords that signal each category (Dutch + English)
+KEYWORDS = {
+    "plastic_waste": [
+        # Dutch
+        "plastic", "kunststof", "verpakking", "verpakkingen", "verpakkingsmateriaal",
+        "afval", "afvalreductie", "recycl", "hergebruik", "circulair", "zwerfafval",
+        "bioplastic", "verpakkingsvrij", "statiegeld", "single-use", "wegwerpplastic",
+        # English
+        "packaging", "plastic waste", "waste reduction", "circular", "recyclable",
+        "single use", "plastic-free", "recycled material", "waste management",
+    ],
+    "education": [
+        # Dutch
+        "opleiding", "opleidingen", "onderwijs", "educatie", "training", "leren",
+        "bewustwording", "kennisdeling", "medewerkersopleiding", "scholing",
+        "cursus", "leerprogramma", "bewust", "kennis", "voorlichting",
+        # English
+        "education", "training", "learning", "awareness", "employee education",
+        "knowledge", "upskilling", "programme", "curriculum",
+    ],
+    "sustainability": [
+        # Dutch
+        "duurzaamheid", "duurzaam", "mvo", "maatschappelijk verantwoord",
+        "klimaat", "co2", "co₂", "uitstoot", "milieu", "groen", "carbon",
+        "netto nul", "net zero", "energietransitie", "fossielvrij",
+        # English
+        "sustainability", "sustainable", "climate", "emissions", "carbon neutral",
+        "net zero", "environmental", "green", "esg", "responsibility",
+    ],
+}
 
 
-def _fallback_analysis(text: str) -> dict:
-    """Keyword-based fallback if Claude API fails."""
+def extract_quote(text: str, keyword: str, context_chars: int = 120) -> str:
+    """Extract a short sentence around a keyword match."""
+    idx = text.lower().find(keyword.lower())
+    if idx == -1:
+        return ""
+    start = max(0, idx - context_chars // 2)
+    end = min(len(text), idx + context_chars // 2)
+    snippet = text[start:end].strip()
+    # Clean up partial words at edges
+    if start > 0 and not text[start - 1].isspace():
+        snippet = snippet[snippet.find(" ") + 1:]
+    if end < len(text) and not text[end].isspace():
+        snippet = snippet[: snippet.rfind(" ")]
+    return snippet.replace("\n", " ").strip()
+
+
+def keyword_analysis(text: str) -> dict:
+    """
+    Scan text for relevant keywords. Free, instant, no API.
+    Scores 1-10 based on signal strength:
+      plastic/waste keywords found  → +3 (core SoR topic)
+      education keywords found      → +2
+      sustainability keywords found → +1
+      bonus for multiple hits       → +1 each category (max +1)
+    """
     text_lower = text.lower()
-    edu_keywords = ["onderwijs", "opleiding", "training", "educatie", "leren", "education"]
-    sus_keywords = ["duurzaamheid", "sustainability", "co2", "klimaat", "milieu", "groen"]
-    plastic_keywords = ["plastic", "kunststof", "verpakking", "afval", "recycl"]
+    quotes = []
+    hits = {}
 
-    mentions_edu = any(k in text_lower for k in edu_keywords)
-    mentions_sus = any(k in text_lower for k in sus_keywords)
-    mentions_plastic = any(k in text_lower for k in plastic_keywords)
+    for category, keywords in KEYWORDS.items():
+        matched = [kw for kw in keywords if kw in text_lower]
+        hits[category] = matched
 
-    score = 2
+        if matched:
+            # Pull a real quote for the strongest keyword hit
+            quote = extract_quote(text, matched[0])
+            if quote:
+                quotes.append(quote[:120])
+
+    mentions_plastic = bool(hits["plastic_waste"])
+    mentions_edu = bool(hits["education"])
+    mentions_sus = bool(hits["sustainability"])
+
+    # Scoring — weighted for SoR relevance
+    score = 1
     if mentions_plastic:
-        score += 3  # highest weight — core SoR differentiator
+        score += 3
+        if len(hits["plastic_waste"]) >= 3:  # multiple plastic signals = strong lead
+            score += 1
     if mentions_edu:
         score += 2
+        if len(hits["education"]) >= 3:
+            score += 1
     if mentions_sus:
         score += 1
+    score = min(score, 10)
+
+    # Build summary from actual matched keywords
+    signals = []
+    if hits["plastic_waste"]:
+        signals.append(f"plastic/afval ({', '.join(hits['plastic_waste'][:3])})")
+    if hits["education"]:
+        signals.append(f"educatie ({', '.join(hits['education'][:3])})")
+    if hits["sustainability"]:
+        signals.append(f"duurzaamheid ({', '.join(hits['sustainability'][:2])})")
+
+    summary = f"Gevonden: {' | '.join(signals)}." if signals else "Geen relevante trefwoorden gevonden."
 
     return {
         "mentions_education": mentions_edu,
         "mentions_sustainability": mentions_sus,
         "mentions_plastic_waste": mentions_plastic,
         "relevance_score": score,
-        "key_quotes": "(keyword-based fallback analysis)",
-        "analysis_summary": "Fallback keyword analysis used - Claude API unavailable.",
+        "key_quotes": " | ".join(quotes[:2]) if quotes else "",
+        "analysis_summary": summary,
     }
 
 
@@ -327,7 +350,7 @@ def load_existing_results(path: Path) -> dict:
 # ---------------------------------------------------------------------------
 
 def run(limit: int | None = None, dry_run: bool = False) -> list[dict]:
-    log.info("Stage 2: Scanning CSR reports")
+    log.info("Stage 2: Scanning CSR reports (free keyword analysis — no API)")
 
     # Load companies
     if not config.COMPANIES_CSV.exists():
@@ -412,9 +435,8 @@ def run(limit: int | None = None, dry_run: bool = False) -> list[dict]:
             time.sleep(config.REQUEST_DELAY)
             continue
 
-        # 3. Analyze with Claude
-        time.sleep(config.API_DELAY)
-        analysis = analyze_with_claude(name, text, dry_run=dry_run)
+        # 3. Keyword analysis — free, no API
+        analysis = keyword_analysis(text)
         row.update(analysis)
         results.append(row)
 
