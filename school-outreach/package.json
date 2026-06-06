@@ -1,0 +1,10 @@
+{
+  "name": "outreach-june26",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dry-run": "node outreach.js",
+    "send": "node outreach.js --send",
+    "replies": "node outreach.js --replies"
+  }
+}
