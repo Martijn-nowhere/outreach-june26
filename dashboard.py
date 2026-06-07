@@ -6,7 +6,8 @@ Open: http://localhost:5001
 
 import csv
 import os
-from flask import Flask, render_template_string, abort, Markup
+from flask import Flask, render_template_string, abort
+from markupsafe import Markup
 from urllib.parse import quote, unquote
 
 app = Flask(__name__)
