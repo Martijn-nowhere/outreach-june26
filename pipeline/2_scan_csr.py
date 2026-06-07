@@ -29,6 +29,12 @@ try:
 except BaseException:
     HAS_PDFPLUMBER = False
 
+try:
+    import anthropic
+    HAS_ANTHROPIC = True
+except ImportError:
+    HAS_ANTHROPIC = False
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
 
@@ -458,6 +464,71 @@ def load_progress() -> dict:
     return {}
 
 
+def analyze_with_claude(company_name: str, text: str) -> Optional[dict]:
+    """
+    Use Claude Haiku to deeply analyze CSR text.
+    Called only when keyword scan score < 6 but a page was found.
+    Returns updated analysis dict or None if API unavailable.
+    """
+    if not HAS_ANTHROPIC or not config.ANTHROPIC_API_KEY:
+        return None
+
+    client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
+
+    prompt = f"""Analyseer deze tekst van de website van {company_name} en beoordeel de relevantie voor School of Recycling — een educatief platform dat bedrijven helpt via online cursussen over afval, plastic en recycling (schoolofrecycling.com).
+
+TEKST:
+---
+{text[:6000]}
+---
+
+Beantwoord in JSON:
+{{
+  "mentions_education": true/false,
+  "mentions_sustainability": true/false,
+  "mentions_plastic_waste": true/false,
+  "mentions_community": true/false,
+  "relevance_score": <1-10>,
+  "best_angle": "<employee_education|school_sponsorship|client_gift|custom_course|none>",
+  "key_quotes": "<max 2 relevante quotes, max 100 tekens elk, gescheiden door |>",
+  "analysis_summary": "<max 2 zinnen: beste hoek + waarom relevant>"
+}}
+
+Scoringsregels:
+- Plastic/verpakking/afval/recycling/circulair als kernthema: +3
+- Medewerkersopleiding/training/educatie: +2
+- Schoolsponsoring/jeugd/lokale gemeenschap/lokale betrokkenheid: +2
+- Klantrelaties/klantbeleving: +1
+- Algemene duurzaamheid: +1
+- Score 8-10 = sterke lead, 6-7 = goede lead, 4-5 = interessant, <4 = skip
+
+Geef ALLEEN geldige JSON terug."""
+
+    try:
+        msg = client.messages.create(
+            model=config.CLAUDE_MODEL,
+            max_tokens=400,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = msg.content[0].text.strip()
+        match = re.search(r"\{.*\}", raw, re.DOTALL)
+        if match:
+            result = json.loads(match.group())
+            # Add angle_label
+            angle_labels = {
+                "employee_education": "Medewerkerseducatie — train eigen personeel",
+                "school_sponsorship": "Schoolsponsoring — subsidieer cursussen voor scholen",
+                "client_gift":        "Klantgeschenk — bied cursussen aan klanten/relaties",
+                "custom_course":      "Maatwerk cursus — bedrijfsspecifieke afvalcursus",
+                "none":               "Onbekend — nader onderzoek nodig",
+            }
+            result["angle_label"] = angle_labels.get(result.get("best_angle", "none"), "")
+            return result
+    except Exception as e:
+        log.warning("  Claude API error for %s: %s", company_name, e)
+    return None
+
+
 def save_progress(progress: dict) -> None:
     with open(config.PROGRESS_JSON, "w") as f:
         json.dump(progress, f, indent=2, ensure_ascii=False)
@@ -479,7 +550,8 @@ def load_existing_results(path: Path) -> dict:
 # ---------------------------------------------------------------------------
 
 def run(limit: Optional[int] = None, dry_run: bool = False) -> List[dict]:
-    log.info("Stage 2: Scanning CSR reports (free keyword analysis — no API)")
+    api_mode = "keywords + Claude API" if (HAS_ANTHROPIC and config.ANTHROPIC_API_KEY) else "keywords only (free)"
+    log.info("Stage 2: Scanning CSR reports (%s)", api_mode)
 
     # Load companies
     if not config.COMPANIES_CSV.exists():
@@ -568,6 +640,21 @@ def run(limit: Optional[int] = None, dry_run: bool = False) -> List[dict]:
 
         # 3. Keyword analysis — free, no API
         analysis = keyword_analysis(text)
+
+        # 4. If keyword score < 6 and API available, let Claude re-read the page
+        kw_score = analysis.get("relevance_score", 0)
+        if kw_score < 6 and config.ANTHROPIC_API_KEY:
+            log.info("  Keyword score=%d — asking Claude for deeper read...", kw_score)
+            claude_analysis = analyze_with_claude(name, text)
+            if claude_analysis:
+                claude_score = claude_analysis.get("relevance_score", 0)
+                log.info("  Claude score=%d (was %d) — using %s",
+                         claude_score, kw_score,
+                         "Claude" if claude_score >= kw_score else "keywords")
+                if claude_score >= kw_score:
+                    analysis = claude_analysis
+            time.sleep(config.API_DELAY)
+
         row.update(analysis)
         results.append(row)
 
