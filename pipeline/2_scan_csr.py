@@ -74,7 +74,7 @@ def get_base_url(website: str) -> str:
     return f"{parsed.scheme}://{parsed.netloc}"
 
 
-def try_url(url: str, session: requests.Session, timeout: int = 8) -> requests.Response | None:
+def try_url(url: str, session: requests.Session, timeout: int = 8) -> Optional[requests.Response]:
     """Try fetching a URL, return Response or None."""
     try:
         resp = session.get(url, headers=HEADERS, timeout=timeout, allow_redirects=True)
