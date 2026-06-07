@@ -358,11 +358,14 @@ def home():
     li_ct       = sum(1 for c in (contacts or []) if c.get("linkedin_url", "").strip())
     draft_ct    = len(drafts) if drafts else 0
 
-    # angle distribution
+    # angle distribution — use human-readable label, skip "none"
     angles = {}
     for r in (csr or []):
-        angle = r.get("best_angle", "") or angle_from_summary(r.get("analysis_summary", ""))
-        angles[angle] = angles.get(angle, 0) + 1
+        angle_key = r.get("best_angle", "") or ""
+        if not angle_key or angle_key == "none":
+            continue
+        label = r.get("angle_label", angle_key).split(" — ")[0]  # take short part before "—"
+        angles[label] = angles.get(label, 0) + 1
     max_angle = max(angles.values(), default=1)
 
     # --- Build HTML ---
@@ -414,8 +417,9 @@ def home():
         for r in csr:
             name   = r.get("company_name", "")
             score  = r.get("relevance_score", "")
-            angle  = r.get("best_angle", "") or angle_from_summary(r.get("analysis_summary", ""))
-            color  = ANGLE_COLORS.get(angle, "#2d6a4f")
+            angle_key = r.get("best_angle", "") or ""
+            angle_label = r.get("angle_label", angle_key).split(" — ")[0]
+            color  = ANGLE_COLORS.get(angle_key, "#2d6a4f")
             sc     = _score(score)
             sc_col = score_color(score)
             plastic = bool_icon(r.get("mentions_plastic_waste", ""))
@@ -432,7 +436,7 @@ def home():
                 f'<tr>'
                 f'<td><strong>{_esc(name)}</strong></td>'
                 f'<td><span class="score-pill" style="background:{sc_col}">{_esc(str(score))}</span></td>'
-                f'<td><span class="badge" style="background:{color}">{angle}</span></td>'
+                f'<td><span class="badge" style="background:{color}">{_esc(angle_label)}</span></td>'
                 f'<td class="{plastic_cls}">{plastic}</td>'
                 f'<td class="{edu_cls}">{edu}</td>'
                 f'<td class="{sust_cls}">{sust}</td>'
