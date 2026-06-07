@@ -182,8 +182,8 @@ def extract_linkedin_links(resp: requests.Response) -> List[str]:
 # ---------------------------------------------------------------------------
 
 def _google_jitter_sleep() -> None:
-    """Sleep between 2.5 and 4.5 seconds to avoid Google rate limiting."""
-    delay = random.uniform(2.5, 4.5)
+    """Sleep between 8 and 15 seconds to avoid Google rate limiting."""
+    delay = random.uniform(8, 15)
     log.debug("  Google rate limit delay: %.1fs", delay)
     time.sleep(delay)
 
