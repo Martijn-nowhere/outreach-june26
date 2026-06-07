@@ -157,7 +157,54 @@ def find_csr_url(company: dict, session: requests.Session) -> Optional[str]:
     except Exception as e:
         log.debug("  Homepage scan failed: %s", e)
 
-    log.warning("  No CSR page found for %s", company["company_name"])
+    # 4. Google search fallback: "[Company] sustainability report" / "mvo rapport"
+    name = company["company_name"]
+    log.info("  Trying Google search fallback for %s", name)
+    google_result = _google_csr_search(name, session)
+    if google_result:
+        log.info("  Found via Google: %s", google_result)
+        return google_result
+
+    log.warning("  No CSR page found for %s", name)
+    return None
+
+
+def _google_csr_search(company_name: str, session: requests.Session) -> Optional[str]:
+    """
+    Google '[Company] sustainability report filetype:pdf' and '[Company] mvo rapport'
+    and return the first plausible result URL.
+    """
+    import urllib.parse
+    queries = [
+        f'"{company_name}" sustainability report filetype:pdf',
+        f'"{company_name}" mvo rapport filetype:pdf',
+        f'"{company_name}" duurzaamheidsrapport',
+        f'"{company_name}" csr report sustainability',
+    ]
+    for query in queries:
+        try:
+            url = "https://www.google.com/search?q=" + urllib.parse.quote(query) + "&num=5"
+            resp = session.get(url, headers=HEADERS, timeout=10)
+            if resp.status_code == 429:
+                log.warning("  Google rate-limited — waiting 30s")
+                time.sleep(30)
+                continue
+            soup = BeautifulSoup(resp.text, "html.parser")
+            for a in soup.find_all("a", href=True):
+                href = a["href"]
+                # Google wraps results in /url?q=
+                if "/url?q=" in href:
+                    href = href.split("/url?q=")[1].split("&")[0]
+                    href = urllib.parse.unquote(href)
+                if href.startswith("http") and "google.com" not in href:
+                    # Prefer PDF links, then sustainability-keyword URLs
+                    if href.lower().endswith(".pdf") or any(
+                        kw in href.lower() for kw in ["sustain", "duurzaam", "csr", "mvo", "rapport", "report"]
+                    ):
+                        return href
+            time.sleep(2)
+        except Exception as e:
+            log.debug("  Google search error: %s", e)
     return None
 
 
