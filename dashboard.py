@@ -437,7 +437,7 @@ def home():
                 f'<tr>'
                 f'<td><strong>{_esc(name)}</strong></td>'
                 f'<td><span class="score-pill" style="background:{sc_col}">{_esc(str(score))}</span></td>'
-                f'<td>{"<span class=\"badge\" style=\"background:"+color+"\">"+_esc(angle_label)+"</span>" if angle_label else "<span style=\"color:#bbb\">—</span>"}</td>'
+                f'<td>{_angle_badge(angle_label, color)}</td>'
                 f'<td class="{plastic_cls}">{plastic}</td>'
                 f'<td class="{edu_cls}">{edu}</td>'
                 f'<td class="{sust_cls}">{sust}</td>'
@@ -713,6 +713,12 @@ def _score(val):
         return int(float(val))
     except (ValueError, TypeError):
         return 0
+
+
+def _angle_badge(label, color):
+    if label:
+        return '<span class="badge" style="background:' + color + '">' + _esc(label) + '</span>'
+    return '<span style="color:#bbb">—</span>'
 
 
 def _esc(text):
