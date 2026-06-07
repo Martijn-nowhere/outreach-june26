@@ -6,6 +6,7 @@ Also generates a LinkedIn connection note (max 300 chars).
 Saves to data/outreach_drafts.csv
 """
 import sys
+from typing import Optional
 import csv
 import json
 import time
@@ -359,7 +360,7 @@ def save_progress(progress: dict) -> None:
 # Main runner
 # ---------------------------------------------------------------------------
 
-def run(limit: int | None = None, dry_run: bool = False) -> list[dict]:
+def run(limit: Optional[int] = None, dry_run: bool = False) -> list[dict]:
     log.info("Stage 4: Generating outreach drafts")
 
     contacts = load_contacts()

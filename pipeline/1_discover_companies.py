@@ -4,6 +4,7 @@ Uses a curated seed list of 100 real mid-to-high level Netherlands companies.
 Saves to data/companies.csv
 """
 import sys
+from typing import Optional
 import csv
 import json
 import time
@@ -171,7 +172,7 @@ def enrich_company(company: dict) -> dict:
     return company
 
 
-def save_companies(companies: list[dict], path: Path, limit: int | None = None) -> None:
+def save_companies(companies: list[dict], path: Path, limit: Optional[int] = None) -> None:
     path.parent.mkdir(exist_ok=True)
     if limit:
         companies = companies[:limit]
@@ -184,7 +185,7 @@ def save_companies(companies: list[dict], path: Path, limit: int | None = None) 
     log.info("Saved %d companies to %s", len(companies), path)
 
 
-def run(limit: int | None = None, dry_run: bool = False) -> list[dict]:
+def run(limit: Optional[int] = None, dry_run: bool = False) -> list[dict]:
     log.info("Stage 1: Discovering companies (seed list of %d)", len(SEED_COMPANIES))
     companies = [enrich_company(dict(c)) for c in SEED_COMPANIES]
 

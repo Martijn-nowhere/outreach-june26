@@ -5,6 +5,7 @@ Two outputs:
   2. Gmail drafts via Gmail API (OAuth)
 """
 import sys
+from typing import Optional, Tuple
 import csv
 import json
 import base64
@@ -75,7 +76,7 @@ LINKEDIN_QUEUE_FIELDS = [
 ]
 
 
-def split_name(full_name: str) -> tuple[str, str]:
+def split_name(full_name: str) -> Tuple[str, str]:
     """Split full name into first and last."""
     parts = full_name.strip().split()
     if not parts:
@@ -290,7 +291,7 @@ def get_gmail_service():
     return build("gmail", "v1", credentials=creds)
 
 
-def create_gmail_draft(service, to_email: str, subject: str, body: str) -> str | None:
+def create_gmail_draft(service, to_email: str, subject: str, body: str) -> Optional[str]:
     """Create a Gmail draft. Returns draft ID or None."""
     try:
         msg = MIMEMultipart("alternative")
@@ -358,7 +359,7 @@ def export_gmail_drafts(
 # Main runner
 # ---------------------------------------------------------------------------
 
-def run(limit: int | None = None, dry_run: bool = False) -> dict:
+def run(limit: Optional[int] = None, dry_run: bool = False) -> dict:
     log.info("Stage 5: Exporting data")
 
     contacts = load_contacts()

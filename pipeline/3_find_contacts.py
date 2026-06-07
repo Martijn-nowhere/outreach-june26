@@ -7,6 +7,7 @@ For each company with relevance_score >= threshold:
 Saves to data/contacts.csv
 """
 import sys
+from typing import Optional, Tuple, List
 import csv
 import json
 import time
@@ -167,7 +168,7 @@ def get_domain(website: str) -> str:
     return netloc
 
 
-def guess_email_patterns(first: str, last: str, domain: str) -> list[tuple[str, str]]:
+def guess_email_patterns(first: str, last: str, domain: str) -> List[Tuple[str, str]]:
     """
     Generate common corporate email patterns.
     Returns list of (email, pattern_name) tuples.
@@ -347,7 +348,7 @@ def load_companies() -> dict:
 # Main runner
 # ---------------------------------------------------------------------------
 
-def run(limit: int | None = None, dry_run: bool = False) -> list[dict]:
+def run(limit: Optional[int] = None, dry_run: bool = False) -> list[dict]:
     log.info("Stage 3: Finding contacts")
 
     csr_data = load_csr_analysis()

@@ -17,6 +17,7 @@ import importlib.util
 import json
 import logging
 import sys
+from typing import Optional
 import time
 from pathlib import Path
 
@@ -75,7 +76,7 @@ def print_config_warnings(dry_run: bool):
         print()
 
 
-def run_discover(limit: int | None, dry_run: bool) -> bool:
+def run_discover(limit: Optional[int], dry_run: bool) -> bool:
     log.info("--- STAGE 1: Company Discovery ---")
     try:
         stage = _load_stage_module("1_discover_companies.py")
@@ -88,7 +89,7 @@ def run_discover(limit: int | None, dry_run: bool) -> bool:
         return False
 
 
-def run_scan(limit: int | None, dry_run: bool) -> bool:
+def run_scan(limit: Optional[int], dry_run: bool) -> bool:
     log.info("--- STAGE 2: CSR Report Scanning ---")
     try:
         stage = _load_stage_module("2_scan_csr.py")
@@ -101,7 +102,7 @@ def run_scan(limit: int | None, dry_run: bool) -> bool:
         return False
 
 
-def run_contacts(limit: int | None, dry_run: bool) -> bool:
+def run_contacts(limit: Optional[int], dry_run: bool) -> bool:
     log.info("--- STAGE 3: Contact Finding ---")
     try:
         stage = _load_stage_module("3_find_contacts.py")
@@ -114,7 +115,7 @@ def run_contacts(limit: int | None, dry_run: bool) -> bool:
         return False
 
 
-def run_draft(limit: int | None, dry_run: bool) -> bool:
+def run_draft(limit: Optional[int], dry_run: bool) -> bool:
     log.info("--- STAGE 4: Draft Generation ---")
     try:
         stage = _load_stage_module("4_draft_outreach.py")
@@ -127,7 +128,7 @@ def run_draft(limit: int | None, dry_run: bool) -> bool:
         return False
 
 
-def run_export(limit: int | None, dry_run: bool) -> bool:
+def run_export(limit: Optional[int], dry_run: bool) -> bool:
     log.info("--- STAGE 5: Export ---")
     try:
         stage = _load_stage_module("5_export.py")

@@ -6,6 +6,7 @@ and plastic/waste mentions. No AI API needed — 100% free.
 Saves results to data/csr_analysis.csv
 """
 import sys
+from typing import Optional, Tuple, List
 import csv
 import json
 import time
@@ -84,7 +85,7 @@ def try_url(url: str, session: requests.Session, timeout: int = 8) -> requests.R
     return None
 
 
-def find_csr_url(company: dict, session: requests.Session) -> str | None:
+def find_csr_url(company: dict, session: requests.Session) -> Optional[str]:
     """
     Try common CSR URL patterns first, then fall back to Google search scraping.
     Returns the best URL found, or None.
@@ -123,7 +124,7 @@ def find_csr_url(company: dict, session: requests.Session) -> str | None:
     return None
 
 
-def find_pdf_link(soup: BeautifulSoup, base_url: str) -> str | None:
+def find_pdf_link(soup: BeautifulSoup, base_url: str) -> Optional[str]:
     """Look for PDF links on a CSR page."""
     pdf_keywords = ["rapport", "report", "sustainability", "csr", "mvo", "annual", "jaarverslag"]
     for a in soup.find_all("a", href=True):
@@ -174,7 +175,7 @@ def extract_text_from_html(resp: requests.Response) -> str:
     return text[:15000]  # Cap at 15k chars for API efficiency
 
 
-def fetch_content(csr_url: str, session: requests.Session) -> tuple[str, str]:
+def fetch_content(csr_url: str, session: requests.Session) -> Tuple[str, str]:
     """
     Fetch content from CSR URL. Returns (text, content_type).
     content_type: 'pdf', 'html', or 'empty'
@@ -422,7 +423,7 @@ def load_existing_results(path: Path) -> dict:
 # Main runner
 # ---------------------------------------------------------------------------
 
-def run(limit: int | None = None, dry_run: bool = False) -> list[dict]:
+def run(limit: Optional[int] = None, dry_run: bool = False) -> list[dict]:
     log.info("Stage 2: Scanning CSR reports (free keyword analysis — no API)")
 
     # Load companies
