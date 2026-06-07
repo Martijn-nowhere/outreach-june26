@@ -6,6 +6,9 @@ Open: http://localhost:5001
 
 import csv
 import os
+import sys
+sys.path.insert(0, os.path.dirname(__file__))
+import config
 from flask import Flask, render_template_string, abort
 from markupsafe import Markup
 from urllib.parse import quote, unquote
@@ -350,7 +353,7 @@ def home():
 
     total       = len(companies) if companies else 0
     csr_found   = len(csr) if csr else 0
-    relevant    = sum(1 for r in (csr or []) if _score(r.get("relevance_score")) >= 6)
+    relevant    = sum(1 for r in (csr or []) if _score(r.get("relevance_score")) >= config.RELEVANCE_THRESHOLD)
     contact_ct  = len(contacts) if contacts else 0
     li_ct       = sum(1 for c in (contacts or []) if c.get("linkedin_url", "").strip())
     draft_ct    = len(drafts) if drafts else 0
@@ -358,7 +361,7 @@ def home():
     # angle distribution
     angles = {}
     for r in (csr or []):
-        angle = angle_from_summary(r.get("analysis_summary", ""))
+        angle = r.get("best_angle", "") or angle_from_summary(r.get("analysis_summary", ""))
         angles[angle] = angles.get(angle, 0) + 1
     max_angle = max(angles.values(), default=1)
 
@@ -369,7 +372,7 @@ def home():
     html += '<div class="cards">'
     html += _card("Companies", total, "in pipeline")
     html += _card("Scanned", csr_found, f"{total - csr_found} not scanned" if total else "")
-    html += _card("Relevant", relevant, "score ≥ 6")
+    html += _card("Relevant", relevant, f"score ≥ {config.RELEVANCE_THRESHOLD}")
     html += _card("Contacts", contact_ct, f"{li_ct} with LinkedIn")
     html += _card("Drafts", draft_ct, "emails generated")
     html += '</div>'
@@ -411,7 +414,7 @@ def home():
         for r in csr:
             name   = r.get("company_name", "")
             score  = r.get("relevance_score", "")
-            angle  = angle_from_summary(r.get("analysis_summary", ""))
+            angle  = r.get("best_angle", "") or angle_from_summary(r.get("analysis_summary", ""))
             color  = ANGLE_COLORS.get(angle, "#2d6a4f")
             sc     = _score(score)
             sc_col = score_color(score)
