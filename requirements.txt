@@ -17,3 +17,6 @@ google-api-python-client>=2.100.0
 # Utilities
 tqdm>=4.66.0
 tenacity>=8.2.0
+
+# Web dashboard
+flask>=3.0.0
