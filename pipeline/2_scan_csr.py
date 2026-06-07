@@ -89,40 +89,69 @@ def try_url(url: str, session: requests.Session, timeout: int = 8) -> Optional[r
 
 def find_csr_url(company: dict, session: requests.Session) -> Optional[str]:
     """
-    Try common CSR URL patterns first, then fall back to Google search scraping.
-    Returns the best URL found, or None.
+    Find the CSR/sustainability page for a company.
+    Strategy:
+      1. Try common URL patterns
+      2. Scan homepage links (nav, footer) for sustainability keywords
+      3. Fall back to homepage itself if it contains sustainability content
     """
     base = get_base_url(company["website"])
-    candidates = [p.format(base=base) for p in config.CSR_URL_PATTERNS]
+    homepage_url = company["website"]
 
+    csr_keywords = [
+        "sustainability", "duurzaamheid", "csr", "mvo", "verantwoord",
+        "impact", "responsibility", "rapport", "report", "milieu",
+        "circulair", "maatschappelijk", "planet", "klimaat",
+    ]
+
+    # 1. Try URL patterns
+    candidates = [p.format(base=base) for p in config.CSR_URL_PATTERNS]
     for url in candidates:
-        log.debug("  Trying pattern URL: %s", url)
         resp = try_url(url, session)
         if resp:
             log.info("  Found CSR page via pattern: %s", url)
             return url
-        time.sleep(0.3)
+        time.sleep(0.2)
 
-    # Fall back to searching page links on the homepage
-    log.debug("  Pattern URLs failed, checking homepage for CSR links...")
-    csr_keywords = [
-        "sustainability", "duurzaamheid", "csr", "mvo", "verantwoord",
-        "impact", "responsibility", "rapport", "report",
-    ]
+    # 2. Fetch homepage and scan ALL links for CSR keywords
+    log.debug("  Scanning homepage links for CSR page...")
     try:
-        resp = try_url(company["website"], session)
+        resp = try_url(homepage_url, session, timeout=10)
         if resp:
             soup = BeautifulSoup(resp.text, "html.parser")
+
+            # Collect all internal links with sustainability keywords in href or text
+            candidates_from_page = []
             for a in soup.find_all("a", href=True):
-                href = a["href"].lower()
-                text = a.get_text().lower()
-                if any(kw in href or kw in text for kw in csr_keywords):
-                    full_url = urljoin(company["website"], a["href"])
-                    log.info("  Found CSR link via homepage scan: %s", full_url)
-                    return full_url
+                href = a["href"]
+                href_lower = href.lower()
+                text_lower = a.get_text().lower().strip()
+
+                if any(kw in href_lower or kw in text_lower for kw in csr_keywords):
+                    full_url = urljoin(homepage_url, href)
+                    # Only follow internal links
+                    if get_base_url(full_url) == base:
+                        candidates_from_page.append(full_url)
+
+            # Try each candidate link
+            for url in candidates_from_page[:5]:  # limit to first 5 matches
+                r = try_url(url, session)
+                if r:
+                    log.info("  Found CSR link via homepage scan: %s", url)
+                    return url
+                time.sleep(0.3)
+
+            # 3. No dedicated CSR page found — use homepage itself if it has content
+            homepage_text = extract_text_from_html(resp)
+            homepage_lower = homepage_text.lower()
+            if any(kw in homepage_lower for kw in csr_keywords):
+                log.info("  No dedicated CSR page — using homepage (has sustainability content)")
+                return homepage_url
+
     except Exception as e:
         log.debug("  Homepage scan failed: %s", e)
 
+    log.warning("  No CSR page found for %s", company["company_name"])
     return None
 
 
