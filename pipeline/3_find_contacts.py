@@ -292,16 +292,10 @@ def find_linkedin_via_google(company_name: str, session: requests.Session) -> Op
     Rate limiting: 3-4 second jitter sleep between queries to avoid being blocked.
     """
     queries = [
-        # 1. Sustainability manager — ideal contact
-        f'site:linkedin.com/in "duurzaamheidsmanager" OR "sustainability manager" OR "CSR manager" OR "MVO manager" "{company_name}"',
-        # 2. Community / communications — good for school sponsorship angle
-        f'site:linkedin.com/in "communicatiemanager" OR "community manager" OR "maatschappelijke betrokkenheid" "{company_name}"',
-        # 3. HR / training — good for employee education angle
-        f'site:linkedin.com/in "HR manager" OR "opleidingsmanager" OR "people & culture" "{company_name}"',
-        # 4. CEO / owner — always valid for family companies, they make the call
+        # 1. Sustainability / CSR manager — ideal contact
+        f'site:linkedin.com/in "duurzaamheidsmanager" OR "sustainability manager" OR "CSR manager" OR "MVO manager" OR "duurzaamheid" OR "communicatiemanager" OR "opleidingsmanager" "{company_name}"',
+        # 2. CEO / owner fallback — family companies, they make the call
         f'site:linkedin.com/in "directeur" OR "eigenaar" OR "oprichter" OR "CEO" OR "algemeen directeur" "{company_name}" Nederland',
-        # 5. Broad fallback — any sustainability-flavoured profile
-        f'site:linkedin.com/in "duurzaamheid" OR "sustainability" OR "CSR" OR "MVO" "{company_name}"',
     ]
 
     all_candidates: List[Dict[str, str]] = []
@@ -321,9 +315,8 @@ def find_linkedin_via_google(company_name: str, session: requests.Session) -> Op
             )
 
             if resp.status_code == 429:
-                log.warning("  Google rate-limited (429). Backing off 30s.")
-                time.sleep(30)
-                _google_jitter_sleep()
+                log.warning("  Google rate-limited (429). Backing off 10s.")
+                time.sleep(10)
                 continue
 
             if resp.status_code != 200:
