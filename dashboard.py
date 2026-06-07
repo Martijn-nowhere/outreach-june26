@@ -763,4 +763,4 @@ def quote_company(name):
 
 if __name__ == "__main__":
     print("Outreach Dashboard running at http://localhost:5001")
-    app.run(debug=True, port=5001, host="0.0.0.0")
+    app.run(debug=False, port=5001, host="0.0.0.0")
