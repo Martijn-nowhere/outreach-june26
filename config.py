@@ -21,7 +21,7 @@ YOUR_PRODUCT_DESCRIPTION = os.getenv(
     "YOUR_PRODUCT_DESCRIPTION",
     "Educational platform helping companies achieve their sustainability goals through employee education programs",
 )
-RELEVANCE_THRESHOLD = int(os.getenv("RELEVANCE_THRESHOLD", "6"))
+RELEVANCE_THRESHOLD = int(os.getenv("RELEVANCE_THRESHOLD", "4"))
 LINKEDIN_DAILY_LIMIT = int(os.getenv("LINKEDIN_DAILY_LIMIT", "5"))
 
 # --- Pipeline settings ---
@@ -55,6 +55,25 @@ CSR_URL_PATTERNS = [
     "{base}/en/sustainability",
     "{base}/verantwoordelijkheid",
     "{base}/impact",
+    # Additional patterns seen in the wild
+    "{base}/over-ons/maatschappelijk-verantwoord-ondernemen",
+    "{base}/over-ons/mvo",
+    "{base}/over-ons/csr",
+    "{base}/nl/over-ons/duurzaamheid",
+    "{base}/maatschappij",
+    "{base}/milieu",
+    "{base}/responsible",
+    "{base}/verantwoord",
+    "{base}/onze-aanpak/duurzaamheid",
+    "{base}/aanpak/duurzaamheid",
+    "{base}/nl/sustainability",
+    "{base}/about/csr",
+    "{base}/about/responsibility",
+    "{base}/about-us/sustainability",
+    "{base}/circulair",
+    "{base}/circulariteit",
+    "{base}/planet",
+    "{base}/people-planet",
 ]
 
 # --- Gmail OAuth scopes ---
