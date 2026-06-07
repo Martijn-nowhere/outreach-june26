@@ -110,8 +110,13 @@ def find_csr_url(company: dict, session: requests.Session) -> Optional[str]:
         "circulair", "maatschappelijk", "planet", "klimaat",
     ]
 
-    # 1. Try URL patterns
-    candidates = [p.format(base=base) for p in config.CSR_URL_PATTERNS]
+    # 1. Try URL patterns — also try .com and .co.uk variants for .nl sites
+    alt_bases = [base]
+    if base.endswith(".nl"):
+        stem = base[:-3]
+        alt_bases += [stem + ".com", stem + "group.com", stem + ".co.uk", stem + "group.co.uk"]
+
+    candidates = [p.format(base=b) for b in alt_bases for p in config.CSR_URL_PATTERNS]
     for url in candidates:
         resp = try_url(url, session)
         if resp:
@@ -171,40 +176,31 @@ def find_csr_url(company: dict, session: requests.Session) -> Optional[str]:
 
 def _google_csr_search(company_name: str, session: requests.Session) -> Optional[str]:
     """
-    Google '[Company] sustainability report filetype:pdf' and '[Company] mvo rapport'
-    and return the first plausible result URL.
+    Google '[Company] sustainability report' and return the first plausible URL.
+    Works across any domain (e.g. .co.uk sister sites, external PDF hosts).
+    Only tries one query to keep runtime short.
     """
     import urllib.parse
-    queries = [
-        f'"{company_name}" sustainability report filetype:pdf',
-        f'"{company_name}" mvo rapport filetype:pdf',
-        f'"{company_name}" duurzaamheidsrapport',
-        f'"{company_name}" csr report sustainability',
-    ]
-    for query in queries:
-        try:
-            url = "https://www.google.com/search?q=" + urllib.parse.quote(query) + "&num=5"
-            resp = session.get(url, headers=HEADERS, timeout=10)
-            if resp.status_code == 429:
-                log.warning("  Google rate-limited — waiting 30s")
-                time.sleep(30)
-                continue
-            soup = BeautifulSoup(resp.text, "html.parser")
-            for a in soup.find_all("a", href=True):
-                href = a["href"]
-                # Google wraps results in /url?q=
-                if "/url?q=" in href:
-                    href = href.split("/url?q=")[1].split("&")[0]
-                    href = urllib.parse.unquote(href)
-                if href.startswith("http") and "google.com" not in href:
-                    # Prefer PDF links, then sustainability-keyword URLs
-                    if href.lower().endswith(".pdf") or any(
-                        kw in href.lower() for kw in ["sustain", "duurzaam", "csr", "mvo", "rapport", "report"]
-                    ):
-                        return href
-            time.sleep(2)
-        except Exception as e:
-            log.debug("  Google search error: %s", e)
+    query = f'"{company_name}" sustainability report OR "mvo rapport" OR duurzaamheid filetype:pdf OR site:*'
+    try:
+        url = "https://www.google.com/search?q=" + urllib.parse.quote(query) + "&num=5"
+        resp = session.get(url, headers=HEADERS, timeout=10)
+        if resp.status_code == 429:
+            log.warning("  Google rate-limited, skipping search fallback")
+            return None
+        soup = BeautifulSoup(resp.text, "html.parser")
+        for a in soup.find_all("a", href=True):
+            href = a["href"]
+            if "/url?q=" in href:
+                href = href.split("/url?q=")[1].split("&")[0]
+                href = urllib.parse.unquote(href)
+            if href.startswith("http") and "google.com" not in href:
+                if href.lower().endswith(".pdf") or any(
+                    kw in href.lower() for kw in ["sustain", "duurzaam", "csr", "mvo", "rapport", "report"]
+                ):
+                    return href
+    except Exception as e:
+        log.debug("  Google search error: %s", e)
     return None
 
 
