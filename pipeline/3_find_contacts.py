@@ -555,6 +555,64 @@ def load_companies() -> Dict[str, dict]:
         return {r["company_name"]: dict(r) for r in csv.DictReader(f)}
 
 
+def find_contact_in_csr_text(company_name: str, csr_by_company: Dict[str, dict]) -> Optional[dict]:
+    """
+    Ask Claude to extract a named contact from the CSR report text already
+    fetched in stage 2. Returns a contact dict or None.
+    """
+    if not HAS_ANTHROPIC or not config.ANTHROPIC_API_KEY:
+        return None
+    csr_row = csr_by_company.get(company_name, {})
+    key_quotes = csr_row.get("key_quotes", "")
+    analysis = csr_row.get("analysis_summary", "")
+    csr_url = csr_row.get("csr_url", "")
+    if not key_quotes and not analysis:
+        return None
+
+    # Re-fetch a snippet of the CSR page to give Claude more text
+    text_for_claude = f"Bedrijf: {company_name}\nCSR URL: {csr_url}\nSamenvatting: {analysis}\nCitaten: {key_quotes}"
+
+    client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
+    prompt = f"""Je krijgt informatie van het CSR/duurzaamheidsrapport van {company_name}.
+Zoek naar een specifiek persoon die wordt genoemd met naam én functie — bij voorkeur duurzaamheidsmanager, MVO-manager, communicatiemanager, HR-manager, of directeur/eigenaar.
+
+TEKST:
+{text_for_claude}
+
+Als je een persoon vindt, geef dan ALLEEN deze JSON terug:
+{{"name": "Voornaam Achternaam", "title": "Functietitel"}}
+
+Als er geen specifiek persoon met naam wordt genoemd, geef dan terug:
+{{"name": "", "title": ""}}
+
+Geef ALLEEN geldige JSON, niets anders."""
+
+    try:
+        msg = client.messages.create(
+            model=config.CLAUDE_MODEL,
+            max_tokens=100,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = msg.content[0].text.strip()
+        match = re.search(r"\{.*\}", raw, re.DOTALL)
+        if match:
+            result = json.loads(match.group())
+            name = result.get("name", "").strip()
+            title = result.get("title", "").strip()
+            if name and len(name.split()) >= 2:
+                return {
+                    "contact_name": name,
+                    "contact_title": title,
+                    "contact_email": "",
+                    "email_confidence": "",
+                    "linkedin_url": "",
+                    "contact_source": "csr_report",
+                }
+    except Exception as e:
+        log.debug("  CSR contact extraction error: %s", e)
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Main runner
 # ---------------------------------------------------------------------------
@@ -582,6 +640,9 @@ def run(limit: Optional[int] = None, dry_run: bool = False) -> List[dict]:
 
     if limit:
         relevant = relevant[:limit]
+
+    # Build CSR text lookup for contact extraction
+    csr_by_company = {r["company_name"]: r for r in csr_data}
 
     existing = load_existing_contacts(config.CONTACTS_CSV)
     progress = load_progress()
@@ -619,9 +680,17 @@ def run(limit: Optional[int] = None, dry_run: bool = False) -> List[dict]:
                 contacts_found.append(row)
             log.info("  [DRY-RUN] Added mock contact")
         else:
-            # 1. Try Google LinkedIn search FIRST
-            log.info("  Trying Google LinkedIn search...")
-            linkedin_candidate = find_linkedin_via_google(name, session)
+            # 0. Try extracting contact from CSR report text (free, no web requests)
+            csr_contact = find_contact_in_csr_text(name, csr_by_company)
+            if csr_contact:
+                log.info("  CSR report contact: %s (%s)", csr_contact.get("contact_name"), csr_contact.get("contact_title"))
+                contacts_found.append(csr_contact)
+
+            # 1. Try Google LinkedIn search (skip if CSR already found a contact)
+            linkedin_candidate = None
+            if not contacts_found:
+                log.info("  Trying Google LinkedIn search...")
+                linkedin_candidate = find_linkedin_via_google(name, session)
             if linkedin_candidate:
                 contact = {
                     "contact_name": linkedin_candidate.get("name", ""),
