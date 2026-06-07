@@ -6,7 +6,7 @@ Open: http://localhost:5001
 
 import csv
 import os
-from flask import Flask, render_template_string, abort
+from flask import Flask, render_template_string, abort, Markup
 from urllib.parse import quote, unquote
 
 app = Flask(__name__)
@@ -328,7 +328,7 @@ BASE = """<!DOCTYPE html>
 
 def render_page(title, active, content):
     return render_template_string(
-        BASE, title=title, active=active, content=content
+        BASE, title=title, active=active, content=Markup(content)
     )
 
 
