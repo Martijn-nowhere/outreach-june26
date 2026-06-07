@@ -418,7 +418,8 @@ def home():
             name   = r.get("company_name", "")
             score  = r.get("relevance_score", "")
             angle_key = r.get("best_angle", "") or ""
-            angle_label = r.get("angle_label", angle_key).split(" — ")[0]
+            raw_label = r.get("angle_label", angle_key).split(" — ")[0]
+            angle_label = raw_label if angle_key and angle_key != "none" else ""
             color  = ANGLE_COLORS.get(angle_key, "#2d6a4f")
             sc     = _score(score)
             sc_col = score_color(score)
@@ -436,7 +437,7 @@ def home():
                 f'<tr>'
                 f'<td><strong>{_esc(name)}</strong></td>'
                 f'<td><span class="score-pill" style="background:{sc_col}">{_esc(str(score))}</span></td>'
-                f'<td><span class="badge" style="background:{color}">{_esc(angle_label)}</span></td>'
+                f'<td>{"<span class=\"badge\" style=\"background:"+color+"\">"+_esc(angle_label)+"</span>" if angle_label else "<span style=\"color:#bbb\">—</span>"}</td>'
                 f'<td class="{plastic_cls}">{plastic}</td>'
                 f'<td class="{edu_cls}">{edu}</td>'
                 f'<td class="{sust_cls}">{sust}</td>'
