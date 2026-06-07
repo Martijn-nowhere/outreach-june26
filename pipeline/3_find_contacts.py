@@ -1,17 +1,19 @@
 """
 Stage 3: Find contact persons for relevant companies.
 For each company with relevance_score >= threshold:
-  - Searches company website for sustainability/CSR team pages
+  - Searches LinkedIn profiles via Google (site:linkedin.com/in) FIRST
+  - Falls back to scraping company website team pages
   - Uses Claude to extract contact names and titles
   - Attempts email pattern guessing or Hunter.io lookup
 Saves to data/contacts.csv
 """
 import sys
-from typing import Optional, Tuple, List
+from typing import Optional, Tuple, List, Dict
 import csv
 import json
 import time
 import logging
+import random
 import re
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
@@ -74,8 +76,9 @@ TEAM_URL_PATTERNS = [
     "{base}/nl/contact",
 ]
 
-# Titles to target (Dutch and English)
+# Titles to target (Dutch and English) — sustainability, community and communications roles
 TARGET_TITLES = [
+    # Core sustainability
     "duurzaamheidsmanager", "duurzaamheid manager",
     "sustainability manager", "sustainability director",
     "csr manager", "csr director", "csr lead",
@@ -85,7 +88,27 @@ TARGET_TITLES = [
     "manager duurzaamheid", "hoofd duurzaamheid",
     "environmental manager", "climate manager",
     "impact manager", "impact director",
-    "ESG manager", "ESG director",
+    "esg manager", "esg director",
+    # Community and communications (relevant for school sponsorship angle)
+    "hoofd communicatie", "communicatiemanager", "pr manager",
+    "community manager", "maatschappelijke betrokkenheid",
+    # Senior decision-makers at small family companies
+    "directeur", "eigenaar", "oprichter", "algemeen directeur",
+    "ceo", "managing director",
+]
+
+# Keywords that indicate a preferred contact for sustainability/community outreach
+# Ordered by preference — first match wins
+PREFERRED_TITLE_KEYWORDS = [
+    # Tier 1 — sustainability specialist, perfect contact
+    "duurzaamheidsmanager", "csr manager", "mvo manager", "sustainability manager",
+    "duurzaamheid", "csr", "mvo", "sustainability", "environmental",
+    # Tier 2 — community / communications, good for school/gift angles
+    "maatschappelijk", "community", "communicatie", "pr manager",
+    # Tier 3 — HR / learning, good for employee education angle
+    "opleiding", "hr manager", "people", "learning",
+    # Tier 4 — senior decision-maker, always valid at family companies
+    "directeur", "eigenaar", "oprichter", "ceo", "algemeen directeur",
 ]
 
 MOCK_CONTACTS = [
@@ -119,7 +142,7 @@ def try_url(url: str, session: requests.Session, timeout: int = 8) -> Optional[r
     return None
 
 
-def find_team_pages(website: str, session: requests.Session) -> list[str]:
+def find_team_pages(website: str, session: requests.Session) -> List[str]:
     """Try common team/about page patterns. Return list of found URLs."""
     base = get_base_url(website)
     found = []
@@ -143,7 +166,7 @@ def extract_page_text(resp: requests.Response) -> str:
     return soup.get_text(separator="\n", strip=True)[:8000]
 
 
-def extract_linkedin_links(resp: requests.Response) -> list[str]:
+def extract_linkedin_links(resp: requests.Response) -> List[str]:
     """Find LinkedIn profile URLs on a page."""
     soup = BeautifulSoup(resp.text, "html.parser")
     links = []
@@ -155,6 +178,202 @@ def extract_linkedin_links(resp: requests.Response) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# LinkedIn via Google search
+# ---------------------------------------------------------------------------
+
+def _google_jitter_sleep() -> None:
+    """Sleep between 2.5 and 4.5 seconds to avoid Google rate limiting."""
+    delay = random.uniform(2.5, 4.5)
+    log.debug("  Google rate limit delay: %.1fs", delay)
+    time.sleep(delay)
+
+
+def _parse_linkedin_from_google_results(soup: BeautifulSoup) -> List[Dict[str, str]]:
+    """
+    Extract LinkedIn profile candidates from a Google search results page.
+    Each result title typically looks like: "Name - Title - Company | LinkedIn"
+    Returns list of {"name": ..., "title": ..., "linkedin_url": ...}
+    """
+    candidates = []
+    seen_urls = set()
+
+    # Google renders results in <div class="g"> blocks with an <a> containing the URL
+    # We look for any anchor whose href contains linkedin.com/in/
+    for a in soup.find_all("a", href=True):
+        href = a["href"]
+
+        # Google often wraps URLs as /url?q=https://...
+        url_match = re.search(r"/url\?q=(https://[^&]+)", href)
+        if url_match:
+            href = url_match.group(1)
+
+        if "linkedin.com/in/" not in href:
+            continue
+
+        # Clean the URL — strip query params
+        clean_url = href.split("?")[0].rstrip("/")
+        if clean_url in seen_urls:
+            continue
+        seen_urls.add(clean_url)
+
+        # Try to get the title text — walk up to a result container
+        name = ""
+        title = ""
+        # The h3 nearest to this link typically has "Name - Title - Company | LinkedIn"
+        parent = a.find_parent()
+        title_tag = None
+        for _ in range(5):
+            if parent is None:
+                break
+            title_tag = parent.find("h3")
+            if title_tag:
+                break
+            parent = parent.find_parent()
+
+        if title_tag:
+            raw_title = title_tag.get_text(strip=True)
+            # Strip trailing "| LinkedIn" or "- LinkedIn"
+            raw_title = re.sub(r"[\|–\-]\s*LinkedIn\s*$", "", raw_title, flags=re.IGNORECASE).strip()
+            # Split on " - " or " – "
+            parts = re.split(r"\s+[-–]\s+", raw_title)
+            if parts:
+                name = parts[0].strip()
+            if len(parts) >= 2:
+                title = parts[1].strip()
+
+        if clean_url:
+            candidates.append({
+                "name": name,
+                "title": title,
+                "linkedin_url": clean_url,
+            })
+
+    return candidates
+
+
+def _pick_best_linkedin_candidate(candidates: List[Dict[str, str]]) -> Optional[Dict[str, str]]:
+    """
+    Pick the best LinkedIn candidate by title preference order.
+    Tier 1 (sustainability) beats Tier 2 (comms) beats Tier 3 (HR) beats Tier 4 (CEO).
+    Falls back to first result if nothing matches at all.
+    """
+    if not candidates:
+        return None
+
+    # Score each candidate by the position of the first matching keyword
+    # Lower index in PREFERRED_TITLE_KEYWORDS = higher priority
+    def title_score(candidate: Dict[str, str]) -> int:
+        title_lower = candidate.get("title", "").lower()
+        for i, kw in enumerate(PREFERRED_TITLE_KEYWORDS):
+            if kw in title_lower:
+                return i
+        return len(PREFERRED_TITLE_KEYWORDS)  # no match — lowest priority
+
+    scored = sorted(candidates, key=title_score)
+    best = scored[0]
+
+    # Only return a CEO/owner if no better option exists
+    best_score = title_score(best)
+    ceo_threshold = PREFERRED_TITLE_KEYWORDS.index("directeur")
+    if best_score >= ceo_threshold:
+        log.debug("  Best match is a senior decision-maker (no specialist found) — still valid for family companies")
+
+    return best
+
+
+def find_linkedin_via_google(company_name: str, session: requests.Session) -> Optional[Dict[str, str]]:
+    """
+    Search Google for LinkedIn profiles of sustainability/community contacts at the company.
+
+    Tries several role-specific queries and returns the best candidate as:
+      {"name": "...", "title": "...", "linkedin_url": "..."}
+    or None if nothing found.
+
+    Rate limiting: 3-4 second jitter sleep between queries to avoid being blocked.
+    """
+    queries = [
+        # 1. Sustainability manager — ideal contact
+        f'site:linkedin.com/in "duurzaamheidsmanager" OR "sustainability manager" OR "CSR manager" OR "MVO manager" "{company_name}"',
+        # 2. Community / communications — good for school sponsorship angle
+        f'site:linkedin.com/in "communicatiemanager" OR "community manager" OR "maatschappelijke betrokkenheid" "{company_name}"',
+        # 3. HR / training — good for employee education angle
+        f'site:linkedin.com/in "HR manager" OR "opleidingsmanager" OR "people & culture" "{company_name}"',
+        # 4. CEO / owner — always valid for family companies, they make the call
+        f'site:linkedin.com/in "directeur" OR "eigenaar" OR "oprichter" OR "CEO" OR "algemeen directeur" "{company_name}" Nederland',
+        # 5. Broad fallback — any sustainability-flavoured profile
+        f'site:linkedin.com/in "duurzaamheid" OR "sustainability" OR "CSR" OR "MVO" "{company_name}"',
+    ]
+
+    all_candidates: List[Dict[str, str]] = []
+
+    for query in queries:
+        log.debug("  Google LinkedIn search: %s", query[:80])
+        try:
+            resp = session.get(
+                "https://www.google.com/search",
+                params={"q": query, "num": 10, "hl": "nl"},
+                headers={
+                    **HEADERS,
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                },
+                timeout=12,
+                allow_redirects=True,
+            )
+
+            if resp.status_code == 429:
+                log.warning("  Google rate-limited (429). Backing off 30s.")
+                time.sleep(30)
+                _google_jitter_sleep()
+                continue
+
+            if resp.status_code != 200:
+                log.debug("  Google search returned %d", resp.status_code)
+                _google_jitter_sleep()
+                continue
+
+            soup = BeautifulSoup(resp.text, "html.parser")
+            candidates = _parse_linkedin_from_google_results(soup)
+            log.debug("  Found %d LinkedIn candidates from this query", len(candidates))
+
+            # If we find a preferred match, return immediately
+            best = _pick_best_linkedin_candidate(candidates)
+            if best and any(kw in best.get("title", "").lower() for kw in PREFERRED_TITLE_KEYWORDS):
+                log.info("  Google LinkedIn: preferred match '%s' (%s)", best.get("name"), best.get("title"))
+                return best
+
+            all_candidates.extend(candidates)
+
+        except Exception as e:
+            log.debug("  Google search error: %s", e)
+
+        _google_jitter_sleep()
+
+        # Stop querying if we already have candidates (avoid over-querying Google)
+        if len(all_candidates) >= 5:
+            break
+
+    # Deduplicate by URL
+    seen = set()
+    unique_candidates = []
+    for c in all_candidates:
+        url = c.get("linkedin_url", "")
+        if url and url not in seen:
+            seen.add(url)
+            unique_candidates.append(c)
+
+    best = _pick_best_linkedin_candidate(unique_candidates)
+    if best:
+        log.info(
+            "  Google LinkedIn: best candidate '%s' (%s) — %s",
+            best.get("name"), best.get("title"), best.get("linkedin_url"),
+        )
+    else:
+        log.info("  Google LinkedIn: no results found for %s", company_name)
+
+    return best
+
+
+# ---------------------------------------------------------------------------
 # Email helpers
 # ---------------------------------------------------------------------------
 
@@ -162,7 +381,6 @@ def get_domain(website: str) -> str:
     """Extract domain from website URL."""
     parsed = urlparse(website)
     netloc = parsed.netloc.lower()
-    # Strip www.
     if netloc.startswith("www."):
         netloc = netloc[4:]
     return netloc
@@ -175,10 +393,8 @@ def guess_email_patterns(first: str, last: str, domain: str) -> List[Tuple[str, 
     """
     first = first.lower().strip()
     last = last.lower().strip()
-    # Handle compound last names
     last_clean = last.replace(" ", "").replace("-", "")
     first_initial = first[0] if first else ""
-    last_initial = last[0] if last else ""
 
     patterns = [
         (f"{first}.{last}@{domain}", "first.last"),
@@ -192,7 +408,7 @@ def guess_email_patterns(first: str, last: str, domain: str) -> List[Tuple[str, 
     return patterns
 
 
-def hunter_lookup(company_name: str, domain: str, session: requests.Session) -> list[dict]:
+def hunter_lookup(company_name: str, domain: str, session: requests.Session) -> List[dict]:
     """Query Hunter.io domain search API."""
     if not config.HUNTER_API_KEY:
         return []
@@ -231,10 +447,10 @@ def hunter_lookup(company_name: str, domain: str, session: requests.Session) -> 
 
 def extract_contacts_with_claude(
     company_name: str,
-    page_texts: list[str],
-    linkedin_links: list[str],
+    page_texts: List[str],
+    linkedin_links: List[str],
     dry_run: bool = False,
-) -> list[dict]:
+) -> List[dict]:
     """Use Claude to extract contact persons from team page text."""
     if dry_run or not HAS_ANTHROPIC or not config.ANTHROPIC_API_KEY:
         return MOCK_CONTACTS.copy()
@@ -244,7 +460,7 @@ def extract_contacts_with_claude(
 
     client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
 
-    prompt = f"""Analyseer de volgende tekst van de website van **{company_name}** en zoek naar contactpersonen die verantwoordelijk zijn voor duurzaamheid, CSR, MVO, of milieu.
+    prompt = f"""Analyseer de volgende tekst van de website van **{company_name}** en zoek naar contactpersonen die verantwoordelijk zijn voor duurzaamheid, CSR, MVO, milieu, communicatie of maatschappelijke betrokkenheid.
 
 WEBSITETEKST:
 ---
@@ -263,8 +479,11 @@ Zoek naar mensen met titels zoals:
 - Environmental Manager
 - ESG Manager/Director
 - Impact Manager
+- Hoofd Communicatie / Communicatiemanager / PR Manager
+- Community Manager / Maatschappelijke betrokkenheid
+- Directeur / Eigenaar / Oprichter (voor kleine familiebedrijven)
 
-Geef een JSON array met maximaal 3 meest relevante contactpersonen. Als er geen directe match is, neem dan de meest senior persoon op het gebied van duurzaamheid of een algemeen directeur/manager.
+Geef een JSON array met maximaal 3 meest relevante contactpersonen. Als er geen directe match is, neem dan de meest senior persoon op het gebied van duurzaamheid, communicatie of een algemeen directeur/manager.
 
 Antwoord ALLEEN met geldige JSON:
 [
@@ -288,7 +507,6 @@ Als er echt geen relevante personen gevonden worden, geef een lege array: []"""
         json_match = re.search(r"\[.*\]", raw, re.DOTALL)
         if json_match:
             contacts = json.loads(json_match.group())
-            # Ensure required fields
             for c in contacts:
                 c.setdefault("contact_name", "")
                 c.setdefault("contact_title", "")
@@ -329,14 +547,14 @@ def load_existing_contacts(path: Path) -> dict:
     return contacts
 
 
-def load_csr_analysis() -> list[dict]:
+def load_csr_analysis() -> List[dict]:
     if not config.CSR_ANALYSIS_CSV.exists():
         return []
     with open(config.CSR_ANALYSIS_CSV, newline="", encoding="utf-8") as f:
         return list(csv.DictReader(f))
 
 
-def load_companies() -> dict:
+def load_companies() -> Dict[str, dict]:
     """Return dict of company_name -> company_data."""
     if not config.COMPANIES_CSV.exists():
         return {}
@@ -348,7 +566,7 @@ def load_companies() -> dict:
 # Main runner
 # ---------------------------------------------------------------------------
 
-def run(limit: Optional[int] = None, dry_run: bool = False) -> list[dict]:
+def run(limit: Optional[int] = None, dry_run: bool = False) -> List[dict]:
     log.info("Stage 3: Finding contacts")
 
     csr_data = load_csr_analysis()
@@ -408,42 +626,75 @@ def run(limit: Optional[int] = None, dry_run: bool = False) -> list[dict]:
                 contacts_found.append(row)
             log.info("  [DRY-RUN] Added mock contact")
         else:
-            # 1. Try Hunter.io
+            # 1. Try Google LinkedIn search FIRST
+            log.info("  Trying Google LinkedIn search...")
+            linkedin_candidate = find_linkedin_via_google(name, session)
+            if linkedin_candidate:
+                contact = {
+                    "contact_name": linkedin_candidate.get("name", ""),
+                    "contact_title": linkedin_candidate.get("title", ""),
+                    "contact_email": "",
+                    "email_confidence": "",
+                    "linkedin_url": linkedin_candidate.get("linkedin_url", ""),
+                    "contact_source": "google_linkedin",
+                }
+                contacts_found.append(contact)
+                log.info(
+                    "  Google LinkedIn found: %s (%s)",
+                    contact["contact_name"], contact["contact_title"],
+                )
+
+            # 2. Try Hunter.io (regardless of LinkedIn result — may add email)
             if config.HUNTER_API_KEY and domain:
                 hunter_contacts = hunter_lookup(name, domain, session)
                 if hunter_contacts:
                     log.info("  Hunter.io found %d contacts", len(hunter_contacts))
-                    contacts_found.extend(hunter_contacts)
+                    # If we already have a LinkedIn contact, enrich with Hunter email if name matches
+                    if contacts_found and hunter_contacts:
+                        li_name = contacts_found[0].get("contact_name", "").lower()
+                        for hc in hunter_contacts:
+                            hc_name = hc.get("contact_name", "").lower()
+                            if li_name and hc_name and (
+                                li_name.split()[0] in hc_name or hc_name.split()[0] in li_name
+                            ):
+                                contacts_found[0]["contact_email"] = hc.get("contact_email", "")
+                                contacts_found[0]["email_confidence"] = hc.get("email_confidence", "")
+                                log.info("  Enriched LinkedIn contact with Hunter.io email")
+                                break
+                    else:
+                        contacts_found.extend(hunter_contacts)
                 time.sleep(config.REQUEST_DELAY)
 
-            # 2. Scrape team/about pages
-            page_texts = []
-            linkedin_links = []
-            if website:
-                team_pages = find_team_pages(website, session)
-                for page_url in team_pages[:3]:
-                    resp = try_url(page_url, session)
+            # 3. Fallback: scrape company website team pages (if no LinkedIn result)
+            if not contacts_found:
+                log.info("  Falling back to website team page scraping...")
+                page_texts = []
+                linkedin_links = []
+                if website:
+                    team_pages = find_team_pages(website, session)
+                    for page_url in team_pages[:3]:
+                        resp = try_url(page_url, session)
+                        if resp:
+                            page_texts.append(extract_page_text(resp))
+                            linkedin_links.extend(extract_linkedin_links(resp))
+                        time.sleep(config.REQUEST_DELAY)
+
+                # Also check CSR page for team info
+                csr_url = csr_row.get("csr_url", "")
+                if csr_url:
+                    resp = try_url(csr_url, session)
                     if resp:
                         page_texts.append(extract_page_text(resp))
                         linkedin_links.extend(extract_linkedin_links(resp))
-                    time.sleep(config.REQUEST_DELAY)
 
-            # Also check CSR page for team info
-            csr_url = csr_row.get("csr_url", "")
-            if csr_url:
-                resp = try_url(csr_url, session)
-                if resp:
-                    page_texts.append(extract_page_text(resp))
-                    linkedin_links.extend(extract_linkedin_links(resp))
-
-            # 3. Claude extraction from pages
-            if page_texts and not contacts_found:
-                time.sleep(config.API_DELAY)
-                claude_contacts = extract_contacts_with_claude(
-                    name, page_texts, list(set(linkedin_links)), dry_run=dry_run
-                )
-                contacts_found.extend(claude_contacts)
-                log.info("  Claude extracted %d contacts", len(claude_contacts))
+                # Claude extraction from pages
+                if page_texts:
+                    time.sleep(config.API_DELAY)
+                    claude_contacts = extract_contacts_with_claude(
+                        name, page_texts, list(set(linkedin_links)), dry_run=dry_run
+                    )
+                    contacts_found.extend(claude_contacts)
+                    log.info("  Claude extracted %d contacts", len(claude_contacts))
 
             # 4. Add email guesses for contacts without emails
             for contact in contacts_found:
@@ -454,7 +705,6 @@ def run(limit: Optional[int] = None, dry_run: bool = False) -> list[dict]:
                         first, last = parts[0], parts[-1]
                         patterns = guess_email_patterns(first, last, domain)
                         if patterns:
-                            # Use first (most common) pattern
                             contact["contact_email"] = patterns[0][0]
                             contact["email_confidence"] = f"pattern:{patterns[0][1]}"
 

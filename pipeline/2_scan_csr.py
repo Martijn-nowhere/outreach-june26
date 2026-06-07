@@ -47,6 +47,7 @@ CSR_ANALYSIS_FIELDS = [
     "mentions_education",
     "mentions_sustainability",
     "mentions_plastic_waste",
+    "mentions_community",
     "best_angle",
     "angle_label",
     "relevance_score",
@@ -58,6 +59,7 @@ MOCK_ANALYSIS = {
     "mentions_education": True,
     "mentions_sustainability": True,
     "mentions_plastic_waste": False,
+    "mentions_community": False,
     "relevance_score": 7,
     "key_quotes": "Wij investeren in de opleiding van medewerkers op het gebied van duurzaamheid.",
     "analysis_summary": "[DRY-RUN] Mock analysis - company appears relevant based on seed data.",
@@ -266,6 +268,19 @@ KEYWORDS = {
         "sustainability", "sustainable", "climate", "emissions", "carbon neutral",
         "net zero", "environmental", "green", "esg", "responsibility",
     ],
+    "community_local": [
+        # Dutch — local roots and community giving
+        "lokale gemeenschap", "onze stad", "onze regio", "thuisstad", "buurt",
+        "buurtbetrokkenheid", "lokale betrokkenheid", "regionaal", "regio",
+        "lokale sponsor", "sponsoring", "sponsoren", "voetbalclub", "sportclub",
+        "lokaal initiatief", "maatschappelijke bijdrage", "teruggeven aan",
+        "verbonden met", "geworteld in", "geboren in", "onze roots",
+        "lokale scholen", "scholen in onze regio", "buurtschool",
+        # English
+        "local community", "our city", "our region", "hometown", "community roots",
+        "local sponsorship", "giving back", "rooted in", "community investment",
+        "local schools", "neighbourhood",
+    ],
 }
 
 
@@ -320,6 +335,7 @@ def keyword_analysis(text: str) -> dict:
     mentions_school = bool(hits["school_sponsorship"])
     mentions_client = bool(hits["client_gift"])
     mentions_sus = bool(hits["sustainability"])
+    mentions_community = bool(hits["community_local"])
 
     # Combined education signal for backwards-compatible field
     mentions_edu = mentions_emp_edu or mentions_school
@@ -342,12 +358,19 @@ def keyword_analysis(text: str) -> dict:
         score += 1
     if mentions_sus:
         score += 1
+    if mentions_community:
+        score += 2
+        # Warm lead combo: plastic waste + local community = +1 bonus
+        if mentions_plastic:
+            score += 1
     score = min(score, 10)
 
     # Determine best sales angle
+    # community_local signal boosts the school_sponsorship angle
+    community_boost = len(hits["community_local"])
     angle_scores = {
         "employee_education": len(hits["employee_education"]) * 2 + len(hits["plastic_waste"]),
-        "school_sponsorship": len(hits["school_sponsorship"]) * 2,
+        "school_sponsorship": len(hits["school_sponsorship"]) * 2 + community_boost,
         "client_gift":        len(hits["client_gift"]) * 2,
         "custom_course":      len(hits["plastic_waste"]) * 2 + len(hits["sustainability"]),
     }
@@ -377,6 +400,8 @@ def keyword_analysis(text: str) -> dict:
         signals.append(f"klantrelaties ({', '.join(hits['client_gift'][:2])})")
     if hits["sustainability"]:
         signals.append(f"duurzaamheid ({', '.join(hits['sustainability'][:2])})")
+    if hits["community_local"]:
+        signals.append(f"lokale gemeenschap ({', '.join(hits['community_local'][:2])})")
 
     summary = f"Beste hoek: {angle_labels[best_angle]}. Gevonden: {' | '.join(signals)}." if signals else "Geen relevante trefwoorden gevonden."
 
@@ -384,6 +409,7 @@ def keyword_analysis(text: str) -> dict:
         "mentions_education": mentions_edu,
         "mentions_sustainability": mentions_sus,
         "mentions_plastic_waste": mentions_plastic,
+        "mentions_community": mentions_community,
         "best_angle": best_angle,
         "angle_label": angle_labels[best_angle],
         "relevance_score": score,
@@ -423,7 +449,7 @@ def load_existing_results(path: Path) -> dict:
 # Main runner
 # ---------------------------------------------------------------------------
 
-def run(limit: Optional[int] = None, dry_run: bool = False) -> list[dict]:
+def run(limit: Optional[int] = None, dry_run: bool = False) -> List[dict]:
     log.info("Stage 2: Scanning CSR reports (free keyword analysis — no API)")
 
     # Load companies
@@ -479,6 +505,7 @@ def run(limit: Optional[int] = None, dry_run: bool = False) -> list[dict]:
                 "mentions_education": False,
                 "mentions_sustainability": False,
                 "mentions_plastic_waste": False,
+                "mentions_community": False,
                 "relevance_score": 0,
                 "key_quotes": "",
                 "analysis_summary": "No CSR page found",
@@ -499,6 +526,7 @@ def run(limit: Optional[int] = None, dry_run: bool = False) -> list[dict]:
                 "mentions_education": False,
                 "mentions_sustainability": False,
                 "mentions_plastic_waste": False,
+                "mentions_community": False,
                 "relevance_score": 1,
                 "key_quotes": "",
                 "analysis_summary": "Could not extract text from CSR page",
