@@ -760,15 +760,9 @@ def run(limit: Optional[int] = None, dry_run: bool = False) -> List[dict]:
 
             # 4. Add email guesses for contacts without emails
             for contact in contacts_found:
-                if not contact.get("contact_email") and domain:
-                    cname = contact.get("contact_name", "")
-                    parts = cname.strip().split()
-                    if len(parts) >= 2:
-                        first, last = parts[0], parts[-1]
-                        patterns = guess_email_patterns(first, last, domain)
-                        if patterns:
-                            contact["contact_email"] = patterns[0][0]
-                            contact["email_confidence"] = f"pattern:{patterns[0][1]}"
+                # Do NOT guess email patterns — guessed emails bounce and hurt deliverability
+                # Only real emails from Hunter.io are kept
+                pass
 
         # If still no contacts found, create a generic entry
         if not contacts_found:

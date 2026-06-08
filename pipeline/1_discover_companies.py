@@ -225,6 +225,20 @@ def run(limit: Optional[int] = None, dry_run: bool = False) -> List[dict]:
         log.info("Skipped %d companies already in active talks: %s", skipped,
                  [c["company_name"] for c in SEED_COMPANIES if c["company_name"] in ALREADY_IN_TALKS])
 
+    # Remove companies that are no longer family/founder-owned
+    NON_FAMILY_KEYWORDS = [
+        "private equity", "listed", "asahi", "wyndham", "mexichem",
+        "stock market", "beursgenoteerd", "pe-backed",
+    ]
+    before = len(companies)
+    companies = [
+        c for c in companies
+        if not any(kw in c.get("ownership", "").lower() for kw in NON_FAMILY_KEYWORDS)
+    ]
+    removed = before - len(companies)
+    if removed:
+        log.info("Removed %d non-family/PE-owned companies", removed)
+
     if limit:
         companies = companies[:limit]
         log.info("Limited to %d companies for this run", limit)
