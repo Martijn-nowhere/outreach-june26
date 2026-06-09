@@ -1,0 +1,14 @@
+{
+  "name": "gemeente-outreach",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "import": "node gemeente-import.js",
+    "import:write": "node gemeente-import.js --write",
+    "apify": "node gemeente-apify.js",
+    "apify:run": "node gemeente-apify.js --run"
+  },
+  "dependencies": {
+    "googleapis": "^144.0.0"
+  }
+}
