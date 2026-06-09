@@ -1,32 +1,75 @@
 #!/usr/bin/env node
 
 /**
- * Gemeente Apify Email Scraper
+ * Gemeente Duurzaamheid Contact Scraper (Apify)
  *
- * Reads website URLs from the Gemeenten sheet, runs the Apify
- * Contact Details Scraper on them, then writes discovered emails back.
+ * For each gemeente, builds targeted URLs (duurzaamheid, college, bestuur pages)
+ * and uses Apify to scrape them for named contacts + direct email addresses.
+ * Writes results to the "Duurzame Contacten" sheet tab.
  *
  * Prerequisites:
  *   1. Run gemeente-import.js --write first (populates website URLs)
  *   2. Set APIFY_TOKEN env var to your personal API token
  *
  * Usage:
- *   APIFY_TOKEN=your_token node gemeente-apify.js          — dry run
- *   APIFY_TOKEN=your_token node gemeente-apify.js --run    — trigger Apify + update sheet
+ *   APIFY_TOKEN=your_token node gemeente-apify.js          — dry run (show URLs, no Apify call)
+ *   APIFY_TOKEN=your_token node gemeente-apify.js --run    — trigger Apify + write to sheet
+ *   APIFY_TOKEN=your_token node gemeente-apify.js --top    — only scrape top-50 sustainability gemeenten
  */
 
 import { get as httpsGet, request as httpsRequest } from 'https';
 import { google } from 'googleapis';
 
 const SPREADSHEET_ID = '1QTCF2nddHm87mDYiRtLBYQKD6j6C1DPC22h2CLENQ1E';
-const SHEET_NAME = 'Gemeenten';
+const GEMEENTEN_SHEET = 'Gemeenten';
+const OUTPUT_SHEET = 'Duurzame Contacten';
 const DRY_RUN = !process.argv.includes('--run');
+const TOP_ONLY = process.argv.includes('--top');
 
 const APIFY_TOKEN = process.env.APIFY_TOKEN;
-const APIFY_ACTOR = 'apify/contact-details-scraper';
+// Website Content Crawler — renders JS, follows links, extracts full page text
+const APIFY_ACTOR = 'apify/website-content-crawler';
 
-// Column indices in the Gemeenten sheet (0-based, after header row)
-const COL = { NAAM: 0, EMAIL: 1, WEBSITE: 2, CONTACTFORM: 3, BRON: 4 };
+const OUTPUT_HEADERS = ['Gemeente', 'Naam', 'Functie', 'Email', 'Bron URL'];
+
+// URL paths to try per gemeente — ordered by most likely to have named contacts
+const TARGET_PATHS = [
+  '/duurzaamheid',
+  '/klimaat',
+  '/milieu',
+  '/bestuur-en-organisatie/college-van-bw',
+  '/bestuur/college',
+  '/over-de-gemeente/college-van-burgemeester-en-wethouders',
+  '/college',
+  '/contact/duurzaamheid',
+  '/themas/duurzaamheid',
+];
+
+// Top-50 sustainability-active gemeenten (for --top mode)
+const TOP_GEMEENTEN = new Set([
+  'Amsterdam', 'Rotterdam', 'Utrecht', 'Den Haag', 'Eindhoven',
+  'Groningen', 'Tilburg', 'Almere', 'Breda', 'Nijmegen',
+  'Enschede', 'Haarlem', 'Arnhem', 'Zaanstad', 'Amersfoort',
+  'Apeldoorn', 'Zwolle', 'Leiden', 'Maastricht', 'Dordrecht',
+  'Zoetermeer', 'Delft', 'Ede', 'Deventer', 'Emmen',
+  'Westland', 'Alkmaar', 'Leeuwarden', 'Venlo', 'Helmond',
+  'Wageningen', 'Zeewolde', 'Dalfsen', 'Tynaarlo', 'Blaricum',
+  'Rozendaal', 'Zoeterwoude', 'Putten', 'Rijssen-Holten',
+  'Haarlemmermeer', 'Kaag en Braassem', 'Alphen aan den Rijn', 'Gouda',
+  'Súdwest-Fryslân', 'Midden-Groningen', 'Smallingerland',
+  'Opsterland', 'Waadhoeke', 'Dantumadiel', 'Nissewaard',
+]);
+
+// Regex patterns to extract named contacts from scraped page text
+const EMAIL_RE = /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g;
+const NAME_RE = /(?:wethouder|adviseur|coordinator|coördinator|beleidsmedewerker|projectleider|ambtenaar|manager|directeur)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})/gi;
+
+// Only keep direct personal emails — skip generic ones
+const SKIP_EMAIL_RE = /^(info|contact|gemeente|post|administratie|communicatie|receptie|noreply|no-reply)@/i;
+
+function isDuurzaamEmail(email) {
+  return /duurzaam|milieu|klimaat|energie|groen|recycl|circulair/i.test(email);
+}
 
 function apifyPost(path, body) {
   return new Promise((resolve, reject) => {
@@ -71,27 +114,34 @@ function apifyGet(path) {
   });
 }
 
-function sleep(ms) {
-  return new Promise(r => setTimeout(r, ms));
-}
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 async function pollRun(runId) {
   console.log(`Polling run ${runId}...`);
   while (true) {
-    const res = await apifyGet(`/v2/acts/${encodeURIComponent(APIFY_ACTOR)}/runs/${runId}?token=${APIFY_TOKEN}`);
+    const res = await apifyGet(`/v2/actor-runs/${runId}?token=${APIFY_TOKEN}`);
     const status = res.data?.status;
-    console.log(`  Status: ${status}`);
-    if (status === 'SUCCEEDED') return res.data.defaultDatasetId;
-    if (['FAILED', 'ABORTED', 'TIMED-OUT'].includes(status)) {
-      throw new Error(`Apify run ${status}`);
-    }
-    await sleep(15000); // check every 15s
+    process.stdout.write(`\r  Status: ${status}        `);
+    if (status === 'SUCCEEDED') { console.log(''); return res.data.defaultDatasetId; }
+    if (['FAILED', 'ABORTED', 'TIMED-OUT'].includes(status)) throw new Error(`Apify run ${status}`);
+    await sleep(20000);
   }
 }
 
 async function fetchDataset(datasetId) {
-  const res = await apifyGet(`/v2/datasets/${datasetId}/items?token=${APIFY_TOKEN}&format=json&clean=true`);
-  return Array.isArray(res) ? res : (res.data?.items || []);
+  // Fetch in batches of 1000
+  const items = [];
+  let offset = 0;
+  while (true) {
+    const res = await apifyGet(
+      `/v2/datasets/${datasetId}/items?token=${APIFY_TOKEN}&format=json&clean=true&limit=1000&offset=${offset}`
+    );
+    const batch = Array.isArray(res) ? res : (res.data?.items || []);
+    items.push(...batch);
+    if (batch.length < 1000) break;
+    offset += 1000;
+  }
+  return items;
 }
 
 async function getAuth() {
@@ -101,47 +151,60 @@ async function getAuth() {
   return auth.getClient();
 }
 
-async function readSheet(sheets) {
+async function readGemeentenSheet(sheets) {
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: SPREADSHEET_ID,
-    range: `${SHEET_NAME}!A1:E`,
+    range: `${GEMEENTEN_SHEET}!A1:E`,
   });
   return res.data.values || [];
 }
 
-async function updateCell(sheets, row, col, value) {
-  const colLetter = String.fromCharCode(65 + col);
-  const range = `${SHEET_NAME}!${colLetter}${row}`;
+async function ensureSheet(sheets, name) {
+  const meta = await sheets.spreadsheets.get({ spreadsheetId: SPREADSHEET_ID });
+  const exists = meta.data.sheets.some(s => s.properties.title === name);
+  if (!exists) {
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: SPREADSHEET_ID,
+      requestBody: { requests: [{ addSheet: { properties: { title: name } } }] },
+    });
+    console.log(`Created sheet tab: ${name}`);
+  }
+}
+
+async function writeToSheet(sheets, rows) {
+  await ensureSheet(sheets, OUTPUT_SHEET);
+  const values = [OUTPUT_HEADERS, ...rows];
   await sheets.spreadsheets.values.update({
     spreadsheetId: SPREADSHEET_ID,
-    range,
+    range: `${OUTPUT_SHEET}!A1`,
     valueInputOption: 'RAW',
-    requestBody: { values: [[value]] },
+    requestBody: { values },
   });
+  console.log(`Wrote ${rows.length} contacts to "${OUTPUT_SHEET}" tab.`);
 }
 
 /**
- * Pick the best email from Apify results for a given URL.
- * Prefers sustainability-related addresses, then generic info@, then first found.
+ * Extract direct personal emails from scraped page text.
+ * Returns emails that look personal (firstname.lastname@ or duurzaamheid-role@).
  */
-function pickBestEmail(emails) {
-  if (!emails || emails.length === 0) return null;
-  const sustainability = emails.find(e =>
-    /duurzaam|milieu|klimaat|groen|recycl/i.test(e)
-  );
-  if (sustainability) return sustainability;
-  const info = emails.find(e => /^info@|^gemeente@|^contact@/i.test(e));
-  if (info) return info;
-  return emails[0];
+function extractPersonalEmails(text, domain) {
+  if (!text) return [];
+  const all = [...new Set(text.match(EMAIL_RE) || [])];
+  return all.filter(e => {
+    // Must be on this gemeente's domain
+    if (!e.toLowerCase().includes(domain.replace(/^www\./, ''))) return false;
+    // Skip generic addresses
+    if (SKIP_EMAIL_RE.test(e)) return false;
+    return true;
+  });
 }
 
 async function main() {
-  console.log('\n=== Gemeente Apify Email Scraper ===');
-  console.log(`Mode: ${DRY_RUN ? 'DRY RUN (add --run to trigger Apify)' : 'LIVE'}\n`);
+  console.log('\n=== Gemeente Duurzaamheid Contact Scraper ===');
+  console.log(`Mode: ${DRY_RUN ? 'DRY RUN' : 'LIVE'}${TOP_ONLY ? ' | TOP-50 only' : ' | all 342 gemeenten'}\n`);
 
   if (!APIFY_TOKEN) {
     console.error('ERROR: APIFY_TOKEN environment variable is not set.');
-    console.error('  Export it before running: export APIFY_TOKEN=your_token_here');
     process.exit(1);
   }
 
@@ -149,106 +212,148 @@ async function main() {
   const sheets = google.sheets({ version: 'v4', auth });
 
   console.log('Reading Gemeenten sheet...');
-  const rows = await readSheet(sheets);
+  const rows = await readGemeentenSheet(sheets);
   if (rows.length < 2) {
-    console.error('Sheet is empty. Run gemeente-import.js --write first.');
+    console.error('Gemeenten sheet is empty. Run gemeente-import.js --write first.');
     process.exit(1);
   }
 
-  // Collect rows with a website but missing or derived email
-  const targets = [];
+  // Build target URL list: multiple paths per gemeente
+  const gemeenten = [];
   for (let i = 1; i < rows.length; i++) {
-    const row = rows[i];
-    const naam = row[COL.NAAM] || '';
-    const email = row[COL.EMAIL] || '';
-    const website = row[COL.WEBSITE] || '';
-    const bron = row[COL.BRON] || '';
+    const naam = rows[i][0] || '';
+    const website = rows[i][2] || '';
+    if (!website || !naam) continue;
 
-    if (!website) continue;
-    // Skip if we already have a CSV-sourced email (most reliable)
-    if (bron === 'CSV' && email) continue;
+    const cleanNaam = naam.replace(/^gemeente\s+/i, '').trim();
+    if (TOP_ONLY && !TOP_GEMEENTEN.has(cleanNaam)) continue;
 
-    targets.push({ sheetRow: i + 1, naam, website, currentEmail: email });
+    let base = website.replace(/\/$/, '');
+    if (!base.startsWith('http')) base = `https://${base}`;
+    gemeenten.push({ naam: cleanNaam, base });
   }
 
-  console.log(`Found ${targets.length} gemeenten to scrape (have website, no CSV email).\n`);
+  // Build one URL per path per gemeente
+  const startUrls = [];
+  for (const g of gemeenten) {
+    for (const path of TARGET_PATHS) {
+      startUrls.push({ url: `${g.base}${path}`, userData: { gemeente: g.naam, base: g.base } });
+    }
+  }
+
+  console.log(`Targeting ${gemeenten.length} gemeenten × ${TARGET_PATHS.length} paths = ${startUrls.length} URLs`);
 
   if (DRY_RUN) {
-    console.log('First 10 targets:');
-    targets.slice(0, 10).forEach(t => console.log(`  ${t.naam} → ${t.website}`));
-    if (targets.length > 10) console.log(`  ... and ${targets.length - 10} more`);
-    console.log(`\nDry run done. Run with --run to trigger Apify scraper.`);
+    console.log('\nSample URLs (first gemeente):');
+    startUrls.slice(0, TARGET_PATHS.length).forEach(u => console.log(`  ${u.url}`));
+    console.log(`\nDry run done. Run with --run to trigger Apify.`);
+    console.log(`Tip: add --top to only scrape the top-50 sustainability gemeenten first.`);
     return;
   }
 
-  // Build start URL list for Apify
-  const startUrls = targets.map(t => ({ url: t.website }));
-
-  console.log(`Triggering Apify actor: ${APIFY_ACTOR}`);
-  console.log(`Sending ${startUrls.length} URLs...\n`);
+  console.log(`\nTriggering Apify actor: ${APIFY_ACTOR}`);
 
   const runRes = await apifyPost(
     `/v2/acts/${encodeURIComponent(APIFY_ACTOR)}/runs?token=${APIFY_TOKEN}`,
     {
-      startUrls,
-      maxDepth: 1,          // only crawl 1 level deep per site (contact/about pages)
-      maxPagesPerDomain: 5, // limit pages per gemeente site
-      contactSelectors: ['a[href^="mailto:"]', 'p', 'div', 'span'],
+      startUrls: startUrls.map(u => ({ url: u.url })),
+      maxCrawlDepth: 0,        // only the exact URLs we provide — no further crawling
+      maxCrawlPages: startUrls.length,
+      crawlerType: 'playwright:firefox',
+      removeElementsCssSelector: 'nav, footer, script, style',
     }
   );
 
   const runId = runRes.data?.id;
   if (!runId) {
-    console.error('Failed to start Apify run:', JSON.stringify(runRes, null, 2));
+    console.error('Failed to start run:', JSON.stringify(runRes, null, 2));
     process.exit(1);
   }
 
   console.log(`Run started. ID: ${runId}`);
-  console.log('Waiting for completion (this takes ~10-20 minutes for 300 sites)...\n');
+  const estMinutes = Math.ceil(startUrls.length / 10);
+  console.log(`Estimated time: ~${estMinutes} minutes\n`);
 
   const datasetId = await pollRun(runId);
-  console.log(`\nRun complete. Dataset: ${datasetId}`);
+  console.log(`Run complete. Dataset: ${datasetId}`);
 
   console.log('Fetching results...');
   const items = await fetchDataset(datasetId);
-  console.log(`Got ${items.length} result items.\n`);
+  console.log(`Got ${items.length} pages scraped.\n`);
 
-  // Build a map: url → emails[]
-  const emailMap = {};
+  // Build map: gemeente name → array of { email, functie, url }
+  const contactMap = {};
+
+  // Build reverse map: base domain → gemeente name
+  const domainToGemeente = {};
+  for (const g of gemeenten) {
+    try {
+      const domain = new URL(g.base).hostname;
+      domainToGemeente[domain] = g.naam;
+    } catch {}
+  }
+
   for (const item of items) {
-    const url = item.url || item.pageUrl || '';
-    const emails = item.emails || item.contactEmails || [];
-    const domain = (() => {
-      try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return ''; }
-    })();
-    if (domain && emails.length > 0) {
-      if (!emailMap[domain]) emailMap[domain] = [];
-      emailMap[domain].push(...emails);
-    }
-  }
+    const pageUrl = item.url || '';
+    const text = item.text || item.markdown || '';
+    if (!text) continue;
 
-  // Write emails back to sheet
-  let updated = 0, notFound = 0;
-  for (const target of targets) {
     let domain = '';
-    try { domain = new URL(target.website).hostname.replace(/^www\./, ''); } catch {}
+    try { domain = new URL(pageUrl).hostname; } catch { continue; }
 
-    const emails = emailMap[domain] || [];
-    const best = pickBestEmail(emails);
+    const gemeente = domainToGemeente[domain];
+    if (!gemeente) continue;
 
-    if (best) {
-      console.log(`  ✓ ${target.naam}: ${best}`);
-      await updateCell(sheets, target.sheetRow, COL.EMAIL, best);
-      await updateCell(sheets, target.sheetRow, COL.BRON, 'apify');
-      updated++;
-    } else {
-      notFound++;
+    const emails = extractPersonalEmails(text, domain);
+    if (emails.length === 0) continue;
+
+    if (!contactMap[gemeente]) contactMap[gemeente] = [];
+    for (const email of emails) {
+      // Try to extract a name near this email in the text
+      const emailIdx = text.indexOf(email);
+      const context = text.slice(Math.max(0, emailIdx - 200), emailIdx + 100);
+      const nameMatch = context.match(/([A-Z][a-z]+(?:\s+(?:van|de|den|der|van\sde|van\sden)?\s*[A-Z][a-z]+){1,3})/);
+      const naam = nameMatch ? nameMatch[1].trim() : '';
+
+      // Try to find a role near the email
+      const roleMatch = context.match(/(wethouder|adviseur|co[oö]rdinator|beleidsmedewerker|projectleider|manager|hoofd)[^\n,]{0,60}/i);
+      const functie = roleMatch ? roleMatch[0].trim() : (isDuurzaamEmail(email) ? 'duurzaamheid contact' : '');
+
+      contactMap[gemeente].push({ naam, functie, email, url: pageUrl });
     }
   }
 
-  console.log(`\n=== Done ===`);
-  console.log(`Emails found and written: ${updated}`);
-  console.log(`No email found:           ${notFound}`);
+  // Build output rows — deduplicate by email
+  const outputRows = [];
+  const seenEmails = new Set();
+
+  for (const gemeente of gemeenten.map(g => g.naam)) {
+    const contacts = contactMap[gemeente] || [];
+    // Prefer contacts with duurzaam in email, then those with a name
+    contacts.sort((a, b) => {
+      if (isDuurzaamEmail(a.email) && !isDuurzaamEmail(b.email)) return -1;
+      if (!isDuurzaamEmail(a.email) && isDuurzaamEmail(b.email)) return 1;
+      if (a.naam && !b.naam) return -1;
+      if (!a.naam && b.naam) return 1;
+      return 0;
+    });
+    for (const c of contacts) {
+      if (seenEmails.has(c.email)) continue;
+      seenEmails.add(c.email);
+      outputRows.push([gemeente, c.naam, c.functie, c.email, c.url]);
+    }
+  }
+
+  console.log(`Extracted ${outputRows.length} personal contacts across ${Object.keys(contactMap).length} gemeenten.\n`);
+
+  if (outputRows.length === 0) {
+    console.log('No personal emails found. The pages may not have publicly listed direct contacts.');
+    console.log('Consider trying LinkedIn Sales Navigator for manual outreach.');
+    return;
+  }
+
+  await writeToSheet(sheets, outputRows);
+  console.log(`\nDone. Check the "${OUTPUT_SHEET}" tab in your Google Sheet.`);
 }
 
 main().catch(err => { console.error(err); process.exit(1); });
