@@ -614,47 +614,68 @@ def linkedin_queue():
             html += '</div>'
         return render_page("LinkedIn Queue", "linkedin", html)
 
-    # Group by day
-    days = {}
-    for row in rows:
-        day = row.get("day", row.get("Day", "1"))
-        days.setdefault(day, []).append(row)
+    # Day colour palette — cycles every 5 days
+    DAY_COLORS = [
+        "#e8f4fd", "#fef9e7", "#eafaf1", "#fdf2f8", "#fef5e7",
+        "#e8f8f5", "#f9f0ff", "#fff3e0", "#e3f2fd", "#f3e5f5",
+    ]
+    STATUS_COLORS = {
+        "Sent":     "#d4edda",
+        "Accepted": "#cce5ff",
+        "Replied":  "#fff3cd",
+    }
 
-    for day_num in sorted(days.keys(), key=lambda x: int(x) if str(x).isdigit() else 0):
-        html += f'<div class="day-group">'
-        html += f'<div class="day-header">Day {_esc(str(day_num))}</div>'
-        group = sorted(days[day_num], key=lambda r: int(r.get("priority", r.get("Priority", 999))))
-        for row in group:
-            priority = row.get("priority", row.get("Priority", ""))
-            name     = row.get("name", row.get("Name", row.get("contact_name", "")))
-            title    = row.get("title", row.get("Title", row.get("contact_title", "")))
-            company  = row.get("company", row.get("Company", row.get("company_name", "")))
-            note     = row.get("connection_note", row.get("linkedin_note", ""))
-            status   = row.get("status", row.get("Status", ""))
-            li_url   = row.get("linkedin_url", row.get("LinkedIn URL", ""))
+    # Sort all rows by priority
+    sorted_rows = sorted(rows, key=lambda r: int(r.get("priority", 999)))
 
-            html += '<div class="queue-item">'
-            html += f'<div class="queue-meta">Priority #{_esc(str(priority))} · {_esc(company)}'
-            if status:
-                html += f' · <em>{_esc(status)}</em>'
-            html += '</div>'
-            html += f'<div class="queue-name">{_esc(name)} <span style="font-weight:400;color:#636e72">· {_esc(title)}</span></div>'
-            if li_url:
-                html += f'<div style="margin:6px 0;font-size:13px"><a href="{_esc(li_url)}" target="_blank">{_esc(li_url)}</a></div>'
-            if note:
-                html += '<div class="field-label" style="margin-top:10px">Connection Note</div>'
-                html += f'<textarea rows="2">{_esc(note)}</textarea>'
-                html += f'<div class="char-count">{len(note)} characters</div>'
-            status_opts = ["Not sent", "Sent", "Accepted", "Replied"]
-            sel_html = '<select onchange="saveStatus(this, \'' + _esc(company).replace("'","\\'") + '\', \'' + _esc(name).replace("'","\\'") + '\')">'
-            for opt in status_opts:
-                selected = ' selected' if opt == status else ''
-                sel_html += f'<option{selected}>{opt}</option>'
-            sel_html += '</select>'
-            html += '<div class="field-label" style="margin-top:10px">Status</div>' + sel_html
-            html += '</div>'
-        html += '</div>'
+    # Stats bar
+    total = len(sorted_rows)
+    sent  = sum(1 for r in sorted_rows if r.get("status","") in ("Sent","Accepted","Replied"))
+    html += f'<div style="margin-bottom:20px;font-size:14px;color:#555">{sent} sent · {total - sent} remaining · {total} total</div>'
 
+    # Full table
+    html += '<div class="table-wrap"><table>'
+    html += '<tr><th>#</th><th>Day</th><th>Company</th><th>Contact</th><th>Title</th><th>LinkedIn</th><th>Note</th><th>Status</th></tr>'
+
+    for row in sorted_rows:
+        priority = row.get("priority", "")
+        name     = row.get("contact_name", "")
+        title    = row.get("contact_title", "")
+        company  = row.get("company_name", "")
+        note     = row.get("connection_note", "")
+        status   = row.get("status", "")
+        li_url   = row.get("linkedin_url", "")
+        sent_day = row.get("sent_date", "")
+        day_num  = int(sent_day.replace("Day ", "")) if sent_day.startswith("Day ") else 1
+
+        row_bg   = STATUS_COLORS.get(status, DAY_COLORS[(day_num - 1) % len(DAY_COLORS)])
+
+        li_link = f'<a href="{_esc(li_url)}" target="_blank" style="font-size:12px">Open →</a>' if li_url else "—"
+        note_short = (note[:80] + "…") if len(note) > 80 else note
+
+        status_opts = ["Not sent", "Sent", "Accepted", "Replied"]
+        co_esc = company.replace("'", "\\'")
+        na_esc = name.replace("'", "\\'")
+        sel = f'<select style="font-size:12px" onchange="saveStatus(this,\'{co_esc}\',\'{na_esc}\')">'
+        for opt in status_opts:
+            selected = " selected" if opt == status else ""
+            sel += f"<option{selected}>{opt}</option>"
+        sel += "</select>"
+
+        html += (
+            f'<tr style="background:{row_bg}">'
+            f'<td>{_esc(str(priority))}</td>'
+            f'<td style="white-space:nowrap">{_esc(sent_day)}</td>'
+            f'<td><strong>{_esc(company)}</strong></td>'
+            f'<td>{_esc(name)}</td>'
+            f'<td style="font-size:12px;color:#666">{_esc(title)}</td>'
+            f'<td>{li_link}</td>'
+            f'<td style="font-size:12px;color:#555;font-style:italic">{_esc(note_short)}</td>'
+            f'<td>{sel}</td>'
+            f'</tr>'
+        )
+
+    html += '</table></div>'
     return render_page("LinkedIn Queue", "linkedin", html)
 
 
