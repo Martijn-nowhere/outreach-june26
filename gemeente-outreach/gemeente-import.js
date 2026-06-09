@@ -12,7 +12,6 @@
  *   node gemeente-import.js --write  — write to Google Sheet
  */
 
-import { https as followHttps } from 'https';
 import { get as httpGet } from 'https';
 import { google } from 'googleapis';
 
