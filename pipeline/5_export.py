@@ -176,8 +176,6 @@ def export_linkedin_queue(
         draft = drafts.get(key, {})
 
         linkedin_url = contact.get("linkedin_url", "")
-        if not linkedin_url:
-            continue  # skip contacts without a LinkedIn URL
 
         connection_note = draft.get("linkedin_note", "")
         follow_up = draft.get("linkedin_followup", "")
