@@ -1,0 +1,49 @@
+name: Gemeente Import
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Run mode'
+        required: true
+        default: 'dry-run'
+        type: choice
+        options:
+          - dry-run
+          - write
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: gemeente-outreach
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/585473727328/locations/global/workloadIdentityPools/github-actions/providers/github
+          service_account: outreach-automation@outreach-june26.iam.gserviceaccount.com
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run gemeente import
+        run: |
+          MODE="${{ github.event.inputs.mode }}"
+          if [ "$MODE" = "write" ]; then
+            node gemeente-import.js --write
+          else
+            node gemeente-import.js
+          fi
