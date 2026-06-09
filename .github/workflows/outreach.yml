@@ -43,6 +43,10 @@ jobs:
         run: npm install
 
       - name: Run outreach
+        env:
+          GMAIL_CLIENT_ID: ${{ secrets.GMAIL_CLIENT_ID }}
+          GMAIL_CLIENT_SECRET: ${{ secrets.GMAIL_CLIENT_SECRET }}
+          GMAIL_REFRESH_TOKEN: ${{ secrets.GMAIL_REFRESH_TOKEN }}
         run: |
           MODE="${{ github.event.inputs.mode || 'send' }}"
           if [ "$MODE" = "send" ]; then
