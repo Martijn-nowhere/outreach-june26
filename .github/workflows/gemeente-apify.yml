@@ -1,0 +1,51 @@
+name: Gemeente Apify Contact Scraper
+
+on:
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: 'Which gemeenten to scrape'
+        required: true
+        default: 'top-50'
+        type: choice
+        options:
+          - top-50
+          - all-342
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    defaults:
+      run:
+        working-directory: gemeente-outreach
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/585473727328/locations/global/workloadIdentityPools/github-actions/providers/github
+          service_account: outreach-automation@outreach-june26.iam.gserviceaccount.com
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run Apify scraper
+        env:
+          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+        run: |
+          if [ "${{ github.event.inputs.scope }}" = "top-50" ]; then
+            node gemeente-apify.js --run --top
+          else
+            node gemeente-apify.js --run
+          fi
