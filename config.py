@@ -11,6 +11,7 @@ load_dotenv(Path(__file__).parent / ".env")
 # --- API Keys ---
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 HUNTER_API_KEY = os.getenv("HUNTER_API_KEY", "")
+APIFY_API_KEY = os.getenv("APIFY_API_KEY", "")
 GMAIL_CREDENTIALS_PATH = os.getenv("GMAIL_CREDENTIALS_PATH", "credentials.json")
 
 # --- Outreach settings ---

@@ -283,24 +283,112 @@ def _pick_best_linkedin_candidate(candidates: List[Dict[str, str]]) -> Optional[
 
 def find_contact_via_bing(company_name: str, website: str, session: requests.Session) -> Optional[Dict[str, str]]:
     """
-    Smart contact finder using Bing search + Claude.
+    Smart contact finder using Apify Google Search + Claude.
 
-    Strategy:
-    1. Bing: "[Company] duurzaamheid verantwoordelijke OR MVO OR sustainability"
-    2. Fetch top 3 result pages (company site, press, news)
-    3. Claude reads all text and extracts: who is responsible for sustainability/CSR/education?
-    4. Bonus: grab LinkedIn URL if it appears anywhere in results
-
-    Returns {"name": "...", "title": "...", "linkedin_url": "..."} or None.
+    Uses Apify's google-search-scraper actor to get real Google results
+    without rate limiting, then asks Claude to extract the responsible person.
+    Falls back to direct Bing search if no Apify key configured.
     """
     if not HAS_ANTHROPIC or not config.ANTHROPIC_API_KEY:
         return None
 
     queries = [
-        f'"{company_name}" duurzaamheid verantwoordelijke OR MVO manager OR sustainability',
+        f'"{company_name}" duurzaamheid verantwoordelijke OR MVO OR sustainability contactpersoon',
         f'"{company_name}" directeur eigenaar oprichter CEO',
     ]
 
+    all_text = []
+    linkedin_urls_found = []
+
+    if config.APIFY_API_KEY:
+        # Use Apify Google Search scraper — no rate limiting
+        all_text, linkedin_urls_found = _apify_search(company_name, queries, session)
+    else:
+        # Fallback: direct Bing search
+        all_text, linkedin_urls_found = _bing_search(company_name, queries, session)
+
+    if not all_text:
+        log.info("  Search: no results for %s", company_name)
+        return None
+
+    return _claude_extract_contact(company_name, all_text, linkedin_urls_found)
+
+
+def _apify_search(company_name: str, queries: List[str], session: requests.Session) -> tuple:
+    """Run queries via Apify Google Search scraper actor."""
+    import urllib.parse
+    all_text = []
+    linkedin_urls_found = []
+
+    for query in queries:
+        try:
+            # Start Apify actor run
+            run_url = "https://api.apify.com/v2/acts/apify~google-search-scraper/run-sync-get-dataset-items"
+            payload = {
+                "queries": query,
+                "maxPagesPerQuery": 1,
+                "resultsPerPage": 8,
+                "languageCode": "nl",
+                "countryCode": "nl",
+            }
+            resp = session.post(
+                run_url,
+                json=payload,
+                headers={"Authorization": f"Bearer {config.APIFY_API_KEY}"},
+                timeout=60,
+            )
+            if resp.status_code != 200:
+                log.warning("  Apify error %d for %s", resp.status_code, company_name)
+                continue
+
+            items = resp.json()
+            snippets = []
+            for item in items:
+                for result in item.get("organicResults", []):
+                    title = result.get("title", "")
+                    snippet = result.get("description", "")
+                    url = result.get("url", "")
+                    if "linkedin.com/in/" in url:
+                        linkedin_urls_found.append(url)
+                    if title or snippet:
+                        snippets.append(f"{title} | {snippet} | {url}")
+
+            if snippets:
+                all_text.append(f"[Query: {query}]\n" + "\n".join(snippets))
+
+            # Fetch top non-LinkedIn result page for more context
+            for item in items:
+                for result in item.get("organicResults", [])[:2]:
+                    url = result.get("url", "")
+                    if url.startswith("http") and "linkedin.com" not in url:
+                        try:
+                            page = session.get(url, headers=HEADERS, timeout=8)
+                            if page.status_code == 200:
+                                page_soup = BeautifulSoup(page.text, "html.parser")
+                                for tag in page_soup(["script","style","nav","footer"]):
+                                    tag.decompose()
+                                page_text = page_soup.get_text(separator=" ", strip=True)[:3000]
+                                all_text.append(f"[Page: {url}]\n{page_text}")
+                                for a in page_soup.find_all("a", href=True):
+                                    if "linkedin.com/in/" in a["href"]:
+                                        linkedin_urls_found.append(a["href"])
+                        except Exception:
+                            pass
+                        break
+
+            time.sleep(1)
+
+        except Exception as e:
+            log.debug("  Apify search error: %s", e)
+
+        if len(all_text) >= 2:
+            break
+
+    return all_text, linkedin_urls_found
+
+
+def _bing_search(company_name: str, queries: List[str], session: requests.Session) -> tuple:
+    """Fallback: direct Bing search."""
     all_text = []
     linkedin_urls_found = []
 
@@ -317,82 +405,50 @@ def find_contact_via_bing(company_name: str, website: str, session: requests.Ses
                 continue
 
             soup = BeautifulSoup(resp.text, "html.parser")
-
-            # Extract LinkedIn URLs from results
             for a in soup.find_all("a", href=True):
-                href = a["href"]
-                if "linkedin.com/in/" in href:
-                    linkedin_urls_found.append(href)
+                if "linkedin.com/in/" in a["href"]:
+                    linkedin_urls_found.append(a["href"])
 
-            # Collect result snippets + titles
             snippets = []
             for result in soup.select(".b_algo")[:5]:
                 title = result.select_one("h2")
-                snippet = result.select_one(".b_caption p, .b_snippetBigText")
-                url_tag = result.select_one("cite")
+                snippet = result.select_one(".b_caption p")
                 parts = []
-                if title:
-                    parts.append(title.get_text())
-                if snippet:
-                    parts.append(snippet.get_text())
-                if url_tag:
-                    parts.append(url_tag.get_text())
-                if parts:
-                    snippets.append(" | ".join(parts))
+                if title: parts.append(title.get_text())
+                if snippet: parts.append(snippet.get_text())
+                if parts: snippets.append(" | ".join(parts))
 
             if snippets:
                 all_text.append(f"[Query: {query}]\n" + "\n".join(snippets))
-
-            # Also try fetching the top non-LinkedIn result page
-            for a in soup.select(".b_algo h2 a")[:2]:
-                href = a.get("href", "")
-                if href.startswith("http") and "linkedin.com" not in href:
-                    try:
-                        page = session.get(href, headers=HEADERS, timeout=8)
-                        if page.status_code == 200 and "text/html" in page.headers.get("content-type",""):
-                            page_soup = BeautifulSoup(page.text, "html.parser")
-                            for tag in page_soup(["script","style","nav","footer"]):
-                                tag.decompose()
-                            page_text = page_soup.get_text(separator=" ", strip=True)[:3000]
-                            all_text.append(f"[Page: {href}]\n{page_text}")
-                            # grab any LinkedIn URLs from this page too
-                            for la in page_soup.find_all("a", href=True):
-                                if "linkedin.com/in/" in la["href"]:
-                                    linkedin_urls_found.append(la["href"])
-                    except Exception:
-                        pass
-                    break
 
             time.sleep(random.uniform(3, 6))
 
         except Exception as e:
             log.debug("  Bing search error: %s", e)
-            continue
 
-        # Stop after first query if we already have good text
         if len(all_text) >= 2:
             break
 
-    if not all_text:
-        log.info("  Bing: no results for %s", company_name)
-        return None
+    return all_text, linkedin_urls_found
 
-    # Ask Claude to extract the responsible person
+
+def _claude_extract_contact(company_name: str, all_text: List[str], linkedin_urls_found: List[str]) -> Optional[Dict[str, str]]:
+    """Ask Claude to extract the responsible contact from search result text."""
     combined = "\n\n".join(all_text)[:8000]
     client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
     prompt = f"""Je bent op zoek naar de juiste contactpersoon bij {company_name} voor School of Recycling — een platform voor duurzaamheidseducatie.
 
-Zoek in de tekst hieronder naar een persoon die verantwoordelijk is voor duurzaamheid, MVO, CSR, communicatie, HR/opleiding, of de directeur/eigenaar.
-Geef voorkeur aan: duurzaamheidsmanager > communicatiemanager > HR/opleiding > directeur/eigenaar.
+Zoek naar een persoon verantwoordelijk voor duurzaamheid, MVO, CSR, communicatie, HR/opleiding, of de directeur/eigenaar.
+Voorkeur: duurzaamheidsmanager > communicatiemanager > HR/opleiding > directeur/eigenaar.
 
 TEKST:
 {combined}
 
-Geef ALLEEN deze JSON terug:
+Geef ALLEEN deze JSON:
 {{"name": "Voornaam Achternaam", "title": "Functietitel", "confidence": "high/medium/low"}}
 
-Als er geen specifiek persoon gevonden wordt: {{"name": "", "title": "", "confidence": "low"}}
-Alleen geldige JSON, niets anders."""
+Geen persoon gevonden: {{"name": "", "title": "", "confidence": "low"}}
+Alleen geldige JSON."""
 
     try:
         msg = client.messages.create(
@@ -409,32 +465,29 @@ Alleen geldige JSON, niets anders."""
             confidence = result.get("confidence", "low")
 
             if name and len(name.split()) >= 2:
-                # Pick best LinkedIn URL if found
                 li_url = ""
                 for url in linkedin_urls_found:
-                    if any(part.lower() in url.lower() for part in name.lower().split()):
+                    if any(p.lower() in url.lower() for p in name.lower().split()):
                         li_url = url
                         break
                 if not li_url and linkedin_urls_found:
                     li_url = linkedin_urls_found[0]
 
-                log.info("  Bing+Claude found: %s (%s) [%s]", name, title, confidence)
+                log.info("  Found: %s (%s) [%s]", name, title, confidence)
                 return {
                     "contact_name": name,
                     "contact_title": title,
                     "contact_email": "",
                     "email_confidence": "",
                     "linkedin_url": li_url,
-                    "contact_source": f"bing_claude:{confidence}",
+                    "contact_source": f"apify_claude:{confidence}" if config.APIFY_API_KEY else f"bing_claude:{confidence}",
                 }
     except Exception as e:
-        log.debug("  Claude contact extraction error: %s", e)
+        log.debug("  Claude extraction error: %s", e)
 
-    log.info("  Bing+Claude: no contact found for %s", company_name)
     return None
 
 
-# Keep old function name as alias so existing call sites still work
 def find_linkedin_via_google(company_name: str, session: requests.Session) -> Optional[Dict[str, str]]:
     return None  # replaced by find_contact_via_bing
 
