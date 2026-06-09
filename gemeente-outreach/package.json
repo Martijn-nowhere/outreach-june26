@@ -5,6 +5,8 @@
   "scripts": {
     "import": "node gemeente-import.js",
     "import:write": "node gemeente-import.js --write",
+    "duurzaam": "node gemeente-duurzaam.js",
+    "duurzaam:write": "node gemeente-duurzaam.js --write",
     "apify": "node gemeente-apify.js",
     "apify:run": "node gemeente-apify.js --run"
   },
