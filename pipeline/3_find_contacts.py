@@ -281,89 +281,162 @@ def _pick_best_linkedin_candidate(candidates: List[Dict[str, str]]) -> Optional[
     return best
 
 
-def find_linkedin_via_google(company_name: str, session: requests.Session) -> Optional[Dict[str, str]]:
+def find_contact_via_bing(company_name: str, website: str, session: requests.Session) -> Optional[Dict[str, str]]:
     """
-    Search Google for LinkedIn profiles of sustainability/community contacts at the company.
+    Smart contact finder using Bing search + Claude.
 
-    Tries several role-specific queries and returns the best candidate as:
-      {"name": "...", "title": "...", "linkedin_url": "..."}
-    or None if nothing found.
+    Strategy:
+    1. Bing: "[Company] duurzaamheid verantwoordelijke OR MVO OR sustainability"
+    2. Fetch top 3 result pages (company site, press, news)
+    3. Claude reads all text and extracts: who is responsible for sustainability/CSR/education?
+    4. Bonus: grab LinkedIn URL if it appears anywhere in results
 
-    Rate limiting: 3-4 second jitter sleep between queries to avoid being blocked.
+    Returns {"name": "...", "title": "...", "linkedin_url": "..."} or None.
     """
+    if not HAS_ANTHROPIC or not config.ANTHROPIC_API_KEY:
+        return None
+
     queries = [
-        # 1. Sustainability / CSR manager — ideal contact
-        f'site:linkedin.com/in "duurzaamheidsmanager" OR "sustainability manager" OR "CSR manager" OR "MVO manager" OR "duurzaamheid" OR "communicatiemanager" OR "opleidingsmanager" "{company_name}"',
-        # 2. CEO / owner fallback — family companies, they make the call
-        f'site:linkedin.com/in "directeur" OR "eigenaar" OR "oprichter" OR "CEO" OR "algemeen directeur" "{company_name}" Nederland',
+        f'"{company_name}" duurzaamheid verantwoordelijke OR MVO manager OR sustainability',
+        f'"{company_name}" directeur eigenaar oprichter CEO',
     ]
 
-    all_candidates: List[Dict[str, str]] = []
+    all_text = []
+    linkedin_urls_found = []
 
     for query in queries:
-        log.debug("  Google LinkedIn search: %s", query[:80])
         try:
             resp = session.get(
-                "https://www.google.com/search",
-                params={"q": query, "num": 10, "hl": "nl"},
-                headers={
-                    **HEADERS,
-                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                },
+                "https://www.bing.com/search",
+                params={"q": query, "count": 8, "setlang": "nl"},
+                headers={**HEADERS, "Accept-Language": "nl-NL,nl;q=0.9"},
                 timeout=12,
-                allow_redirects=True,
             )
-
-            if resp.status_code == 429:
-                log.warning("  Google rate-limited (429). Backing off 10s.")
-                time.sleep(10)
-                continue
-
             if resp.status_code != 200:
-                log.debug("  Google search returned %d", resp.status_code)
-                _google_jitter_sleep()
+                time.sleep(3)
                 continue
 
             soup = BeautifulSoup(resp.text, "html.parser")
-            candidates = _parse_linkedin_from_google_results(soup)
-            log.debug("  Found %d LinkedIn candidates from this query", len(candidates))
 
-            # If we find a preferred match, return immediately
-            best = _pick_best_linkedin_candidate(candidates)
-            if best and any(kw in best.get("title", "").lower() for kw in PREFERRED_TITLE_KEYWORDS):
-                log.info("  Google LinkedIn: preferred match '%s' (%s)", best.get("name"), best.get("title"))
-                return best
+            # Extract LinkedIn URLs from results
+            for a in soup.find_all("a", href=True):
+                href = a["href"]
+                if "linkedin.com/in/" in href:
+                    linkedin_urls_found.append(href)
 
-            all_candidates.extend(candidates)
+            # Collect result snippets + titles
+            snippets = []
+            for result in soup.select(".b_algo")[:5]:
+                title = result.select_one("h2")
+                snippet = result.select_one(".b_caption p, .b_snippetBigText")
+                url_tag = result.select_one("cite")
+                parts = []
+                if title:
+                    parts.append(title.get_text())
+                if snippet:
+                    parts.append(snippet.get_text())
+                if url_tag:
+                    parts.append(url_tag.get_text())
+                if parts:
+                    snippets.append(" | ".join(parts))
+
+            if snippets:
+                all_text.append(f"[Query: {query}]\n" + "\n".join(snippets))
+
+            # Also try fetching the top non-LinkedIn result page
+            for a in soup.select(".b_algo h2 a")[:2]:
+                href = a.get("href", "")
+                if href.startswith("http") and "linkedin.com" not in href:
+                    try:
+                        page = session.get(href, headers=HEADERS, timeout=8)
+                        if page.status_code == 200 and "text/html" in page.headers.get("content-type",""):
+                            page_soup = BeautifulSoup(page.text, "html.parser")
+                            for tag in page_soup(["script","style","nav","footer"]):
+                                tag.decompose()
+                            page_text = page_soup.get_text(separator=" ", strip=True)[:3000]
+                            all_text.append(f"[Page: {href}]\n{page_text}")
+                            # grab any LinkedIn URLs from this page too
+                            for la in page_soup.find_all("a", href=True):
+                                if "linkedin.com/in/" in la["href"]:
+                                    linkedin_urls_found.append(la["href"])
+                    except Exception:
+                        pass
+                    break
+
+            time.sleep(random.uniform(3, 6))
 
         except Exception as e:
-            log.debug("  Google search error: %s", e)
+            log.debug("  Bing search error: %s", e)
+            continue
 
-        _google_jitter_sleep()
-
-        # Stop querying if we already have candidates (avoid over-querying Google)
-        if len(all_candidates) >= 5:
+        # Stop after first query if we already have good text
+        if len(all_text) >= 2:
             break
 
-    # Deduplicate by URL
-    seen = set()
-    unique_candidates = []
-    for c in all_candidates:
-        url = c.get("linkedin_url", "")
-        if url and url not in seen:
-            seen.add(url)
-            unique_candidates.append(c)
+    if not all_text:
+        log.info("  Bing: no results for %s", company_name)
+        return None
 
-    best = _pick_best_linkedin_candidate(unique_candidates)
-    if best:
-        log.info(
-            "  Google LinkedIn: best candidate '%s' (%s) — %s",
-            best.get("name"), best.get("title"), best.get("linkedin_url"),
+    # Ask Claude to extract the responsible person
+    combined = "\n\n".join(all_text)[:8000]
+    client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
+    prompt = f"""Je bent op zoek naar de juiste contactpersoon bij {company_name} voor School of Recycling — een platform voor duurzaamheidseducatie.
+
+Zoek in de tekst hieronder naar een persoon die verantwoordelijk is voor duurzaamheid, MVO, CSR, communicatie, HR/opleiding, of de directeur/eigenaar.
+Geef voorkeur aan: duurzaamheidsmanager > communicatiemanager > HR/opleiding > directeur/eigenaar.
+
+TEKST:
+{combined}
+
+Geef ALLEEN deze JSON terug:
+{{"name": "Voornaam Achternaam", "title": "Functietitel", "confidence": "high/medium/low"}}
+
+Als er geen specifiek persoon gevonden wordt: {{"name": "", "title": "", "confidence": "low"}}
+Alleen geldige JSON, niets anders."""
+
+    try:
+        msg = client.messages.create(
+            model=config.CLAUDE_MODEL,
+            max_tokens=120,
+            messages=[{"role": "user", "content": prompt}],
         )
-    else:
-        log.info("  Google LinkedIn: no results found for %s", company_name)
+        raw = msg.content[0].text.strip()
+        match = re.search(r"\{.*\}", raw, re.DOTALL)
+        if match:
+            result = json.loads(match.group())
+            name = result.get("name", "").strip()
+            title = result.get("title", "").strip()
+            confidence = result.get("confidence", "low")
 
-    return best
+            if name and len(name.split()) >= 2:
+                # Pick best LinkedIn URL if found
+                li_url = ""
+                for url in linkedin_urls_found:
+                    if any(part.lower() in url.lower() for part in name.lower().split()):
+                        li_url = url
+                        break
+                if not li_url and linkedin_urls_found:
+                    li_url = linkedin_urls_found[0]
+
+                log.info("  Bing+Claude found: %s (%s) [%s]", name, title, confidence)
+                return {
+                    "contact_name": name,
+                    "contact_title": title,
+                    "contact_email": "",
+                    "email_confidence": "",
+                    "linkedin_url": li_url,
+                    "contact_source": f"bing_claude:{confidence}",
+                }
+    except Exception as e:
+        log.debug("  Claude contact extraction error: %s", e)
+
+    log.info("  Bing+Claude: no contact found for %s", company_name)
+    return None
+
+
+# Keep old function name as alias so existing call sites still work
+def find_linkedin_via_google(company_name: str, session: requests.Session) -> Optional[Dict[str, str]]:
+    return None  # replaced by find_contact_via_bing
 
 
 # ---------------------------------------------------------------------------
@@ -686,23 +759,23 @@ def run(limit: Optional[int] = None, dry_run: bool = False) -> List[dict]:
                 log.info("  CSR report contact: %s (%s)", csr_contact.get("contact_name"), csr_contact.get("contact_title"))
                 contacts_found.append(csr_contact)
 
-            # 1. Try Google LinkedIn search (skip if CSR already found a contact)
-            linkedin_candidate = None
+            # 1. Bing + Claude smart search (skip if CSR already found a contact)
+            bing_candidate = None
             if not contacts_found:
-                log.info("  Trying Google LinkedIn search...")
-                linkedin_candidate = find_linkedin_via_google(name, session)
-            if linkedin_candidate:
+                log.info("  Trying Bing + Claude smart search...")
+                bing_candidate = find_contact_via_bing(name, website, session)
+            if bing_candidate:
                 contact = {
-                    "contact_name": linkedin_candidate.get("name", ""),
-                    "contact_title": linkedin_candidate.get("title", ""),
+                    "contact_name": bing_candidate.get("contact_name", ""),
+                    "contact_title": bing_candidate.get("contact_title", ""),
                     "contact_email": "",
                     "email_confidence": "",
-                    "linkedin_url": linkedin_candidate.get("linkedin_url", ""),
-                    "contact_source": "google_linkedin",
+                    "linkedin_url": bing_candidate.get("linkedin_url", ""),
+                    "contact_source": bing_candidate.get("contact_source", "bing_claude"),
                 }
                 contacts_found.append(contact)
                 log.info(
-                    "  Google LinkedIn found: %s (%s)",
+                    "  Bing+Claude found: %s (%s)",
                     contact["contact_name"], contact["contact_title"],
                 )
 
