@@ -21,6 +21,7 @@ const SPREADSHEET_ID = '1QTCF2nddHm87mDYiRtLBYQKD6j6C1DPC22h2CLENQ1E';
 const SHEET = 'Tracker';
 const DRY_RUN = !process.argv.includes('--send');
 const FOLLOW_UP_DAYS = 7;
+const DAILY_SEND_LIMIT = 40;
 const LOG_FILE = './outreach-log.json';
 const SENDER = 'Martijn Huizing <martijn@schoolofrecycling.com>';
 
@@ -207,8 +208,13 @@ async function main() {
   console.log('=== END DEBUG ===\n');
 
   let e1Count = 0, e2Count = 0, e3Count = 0, skipped = 0;
+  let totalSent = 0;
 
   for (let i = 0; i < rows.length; i++) {
+    if (totalSent >= DAILY_SEND_LIMIT) {
+      console.log(`\nDaily send limit of ${DAILY_SEND_LIMIT} reached, stopping.`);
+      break;
+    }
     const row = rows[i];
     const school = row[COL.SCHOOL] || '';
     const email = row[COL.EMAIL] || '';
@@ -227,7 +233,7 @@ async function main() {
       if (sent) {
         await updateCell(sheets, i, COL.E1_SENT, today());
         row[COL.E1_SENT] = today();
-        e1Count++;
+        e1Count++; totalSent++;
         await sleep(2000);
       }
       continue;
@@ -239,7 +245,7 @@ async function main() {
       if (sent) {
         await updateCell(sheets, i, COL.E2_SENT, today());
         row[COL.E2_SENT] = today();
-        e2Count++;
+        e2Count++; totalSent++;
         await sleep(2000);
       }
       continue;
@@ -251,7 +257,7 @@ async function main() {
       if (sent) {
         await updateCell(sheets, i, COL.E3_SENT, today());
         row[COL.E3_SENT] = today();
-        e3Count++;
+        e3Count++; totalSent++;
         await sleep(2000);
       }
       continue;
