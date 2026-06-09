@@ -24,7 +24,7 @@ const MEDEWERKERS_URL = 'https://organisaties.overheid.nl/export-medewerkers/Gem
 // Gemeente CSV — for website/email lookup
 const GEMEENTEN_URL = 'https://organisaties.overheid.nl/export/Gemeenten.csv';
 
-const HEADERS = ['Gemeente', 'Naam', 'Functie', 'Email', 'Website', 'Email bron'];
+const HEADERS = ['Gemeente', 'Naam', 'Functie', 'Email', 'Website'];
 
 // Role keywords that indicate a sustainability contact
 const DUURZAAM_KEYWORDS = [
@@ -198,12 +198,11 @@ async function main() {
     const info = gemeenteInfo[gemeenteNaam.toLowerCase()] || {};
     const website = info.website || '';
     let email = info.email || '';
-    let emailBron = email ? 'CSV' : '';
-    if (!email && website) { email = emailFromWebsite(website); emailBron = 'website-afgeleid'; }
+    if (!email) continue; // skip contacts without a real email address
 
     const isTopGemeente = TOP_GEMEENTEN.has(gemeenteNaam);
 
-    contacts.push({ gemeenteNaam, naam, functie, email, website, emailBron, isTopGemeente });
+    contacts.push({ gemeenteNaam, naam, functie, email, website, isTopGemeente });
   }
 
   // Sort: top gemeenten first, then alphabetically
@@ -226,7 +225,7 @@ async function main() {
     return;
   }
 
-  const rows = contacts.map(c => [c.gemeenteNaam, c.naam, c.functie, c.email, c.website, c.emailBron]);
+  const rows = contacts.map(c => [c.gemeenteNaam, c.naam, c.functie, c.email, c.website]);
 
   const auth = await getAuth();
   const sheets = google.sheets({ version: 'v4', auth });
