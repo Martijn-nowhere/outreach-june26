@@ -198,14 +198,6 @@ async function main() {
   const rows = sheetRes.data.valueRanges?.[0]?.values?.slice(1) || [];
   console.log(`Loaded ${rows.length} rows\n`);
 
-  // Debug: show first 3 rows with E1 sent but no E2
-  const debugRows = rows.filter(r => r[COL.E1_SENT] && !r[COL.E2_SENT]).slice(0, 3);
-  console.log('=== DEBUG: first 3 rows with E1 sent, no E2 ===');
-  debugRows.forEach(r => console.log(JSON.stringify({
-    school: r[COL.SCHOOL], send: r[COL.SEND], status: r[COL.STATUS],
-    e1: r[COL.E1_SENT], e2: r[COL.E2_SENT], daysSince: Math.floor((Date.now() - new Date(r[COL.E1_SENT]).getTime()) / 86400000)
-  })));
-  console.log('=== END DEBUG ===\n');
 
   let e1Count = 0, e2Count = 0, e3Count = 0, skipped = 0;
   let totalSent = 0;
