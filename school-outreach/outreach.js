@@ -16,7 +16,6 @@
 
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { google } from 'googleapis';
-import nodemailer from 'nodemailer';
 
 const SPREADSHEET_ID = '1QTCF2nddHm87mDYiRtLBYQKD6j6C1DPC22h2CLENQ1E';
 const SHEET = 'Tracker';
@@ -46,17 +45,14 @@ async function getSheetsAuth() {
   return auth.getClient();
 }
 
-function createTransport() {
-  return nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-      type: 'OAuth2',
-      user: SENDER_EMAIL,
-      clientId: process.env.GMAIL_CLIENT_ID,
-      clientSecret: process.env.GMAIL_CLIENT_SECRET,
-      refreshToken: process.env.GMAIL_REFRESH_TOKEN,
-    },
-  });
+function createGmailClient() {
+  const oauth2Client = new google.auth.OAuth2(
+    process.env.GMAIL_CLIENT_ID,
+    process.env.GMAIL_CLIENT_SECRET,
+    'urn:ietf:wg:oauth:2.0:oob'
+  );
+  oauth2Client.setCredentials({ refresh_token: process.env.GMAIL_REFRESH_TOKEN });
+  return google.gmail({ version: 'v1', auth: oauth2Client });
 }
 
 function sleep(ms) {
@@ -157,14 +153,17 @@ function buildRawMessage(to, subject, body) {
   return Buffer.from(message).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
-async function sendEmail(transport, to, subject, body, log) {
+async function sendEmail(gmail, to, subject, body, log) {
   if (DRY_RUN) {
     console.log(`  [DRY RUN] Would send to: ${to}`);
     console.log(`  Subject: ${subject}`);
     return true;
   }
   try {
-    await transport.sendMail({ from: SENDER, to, subject, text: body });
+    await gmail.users.messages.send({
+      userId: 'me',
+      requestBody: { raw: buildRawMessage(to, subject, body) },
+    });
     log.sent.push({ to, subject, date: today() });
     return true;
   } catch (e) {
@@ -193,7 +192,7 @@ async function updateCell(sheets, rowIndex, colIndex, value) {
 async function main() {
   const log = loadLog();
   const sheetsAuth = await getSheetsAuth();
-  const transport = createTransport();
+  const gmail = createGmailClient();
   const sheets = google.sheets({ version: 'v4', auth: sheetsAuth });
 
   console.log(`\n=== School of Recycling Outreach Automation ===`);
@@ -230,7 +229,7 @@ async function main() {
 
     if (sendFlag === 'Send' && !e1Sent) {
       console.log(`[E1] ${school} <${email}>`);
-      const sent = await sendEmail(transport, email, TEMPLATES.subject1, TEMPLATES.body1(school), log);
+      const sent = await sendEmail(gmail, email, TEMPLATES.subject1, TEMPLATES.body1(school), log);
       if (sent) {
         await updateCell(sheets, i, COL.E1_SENT, today());
         row[COL.E1_SENT] = today();
@@ -242,7 +241,7 @@ async function main() {
 
     if (e1Sent && !e2Sent && daysSince(e1Sent) >= FOLLOW_UP_DAYS) {
       console.log(`[E2] ${school} <${email}> (E1 sent ${daysSince(e1Sent)} days ago)`);
-      const sent = await sendEmail(transport, email, TEMPLATES.subject2, TEMPLATES.body2(school), log);
+      const sent = await sendEmail(gmail, email, TEMPLATES.subject2, TEMPLATES.body2(school), log);
       if (sent) {
         await updateCell(sheets, i, COL.E2_SENT, today());
         row[COL.E2_SENT] = today();
@@ -254,7 +253,7 @@ async function main() {
 
     if (e2Sent && !e3Sent && daysSince(e2Sent) >= FOLLOW_UP_DAYS) {
       console.log(`[E3] ${school} <${email}> (E2 sent ${daysSince(e2Sent)} days ago)`);
-      const sent = await sendEmail(transport, email, TEMPLATES.subject3, TEMPLATES.body3(school), log);
+      const sent = await sendEmail(gmail, email, TEMPLATES.subject3, TEMPLATES.body3(school), log);
       if (sent) {
         await updateCell(sheets, i, COL.E3_SENT, today());
         row[COL.E3_SENT] = today();
