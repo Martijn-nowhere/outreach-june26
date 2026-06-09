@@ -152,6 +152,17 @@ def export_linkedin_queue(
     you know which 5 to send today, which 5 tomorrow, etc. The connection_note
     and follow_up_message columns are pre-filled and ready to copy-paste.
     """
+    # Load existing status/notes to preserve manual updates
+    existing_status = {}
+    if output_path.exists():
+        with open(output_path, newline="", encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                key = (row.get("company_name", ""), row.get("contact_name", ""))
+                existing_status[key] = {
+                    "status": row.get("status", ""),
+                    "notes": row.get("notes", ""),
+                }
+
     rows = []
     # Sort by relevance score descending so highest-fit contacts come first
     sorted_contacts = sorted(
@@ -192,9 +203,9 @@ def export_linkedin_queue(
             "char_count": len(connection_note),
             "csr_hook": csr_hook,
             "follow_up_message": follow_up,
-            "status": "",
-            "sent_date": f"Day {day_number}",  # suggested send day
-            "notes": "",
+            "status": existing_status.get((contact.get("company_name",""), contact.get("contact_name","")), {}).get("status", ""),
+            "sent_date": f"Day {day_number}",
+            "notes": existing_status.get((contact.get("company_name",""), contact.get("contact_name","")), {}).get("notes", ""),
         })
 
     output_path.parent.mkdir(exist_ok=True)

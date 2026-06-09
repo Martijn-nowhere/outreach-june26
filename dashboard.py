@@ -9,7 +9,7 @@ import os
 import sys
 sys.path.insert(0, os.path.dirname(__file__))
 import config
-from flask import Flask, render_template_string, abort
+from flask import Flask, render_template_string, abort, request, jsonify
 from markupsafe import Markup
 from urllib.parse import quote, unquote
 
@@ -315,6 +315,18 @@ BASE = """<!DOCTYPE html>
       .bar-label { width: 100px; }
     }
   </style>
+  <script>
+  function saveStatus(sel, company, contact) {
+    fetch('/api/linkedin_status', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({company_name: company, contact_name: contact, status: sel.value})
+    }).then(r => r.json()).then(d => {
+      sel.style.background = d.ok ? '#d4edda' : '#f8d7da';
+      setTimeout(() => sel.style.background = '', 1500);
+    });
+  }
+  </script>
 </head>
 <body>
 <nav>
@@ -633,15 +645,13 @@ def linkedin_queue():
                 html += '<div class="field-label" style="margin-top:10px">Connection Note</div>'
                 html += f'<textarea rows="2">{_esc(note)}</textarea>'
                 html += f'<div class="char-count">{len(note)} characters</div>'
-            html += (
-                '<div class="field-label" style="margin-top:10px">Status</div>'
-                '<select>'
-                '<option>Not sent</option>'
-                '<option>Sent</option>'
-                '<option>Accepted</option>'
-                '<option>Replied</option>'
-                '</select>'
-            )
+            status_opts = ["Not sent", "Sent", "Accepted", "Replied"]
+            sel_html = '<select onchange="saveStatus(this, \'' + _esc(company).replace("'","\\'") + '\', \'' + _esc(name).replace("'","\\'") + '\')">'
+            for opt in status_opts:
+                selected = ' selected' if opt == status else ''
+                sel_html += f'<option{selected}>{opt}</option>'
+            sel_html += '</select>'
+            html += '<div class="field-label" style="margin-top:10px">Status</div>' + sel_html
             html += '</div>'
         html += '</div>'
 
@@ -755,6 +765,37 @@ def _info(key, val):
 
 def quote_company(name):
     return quote(name, safe="")
+
+
+# ---------------------------------------------------------------------------
+# Status update API
+# ---------------------------------------------------------------------------
+
+@app.route("/api/linkedin_status", methods=["POST"])
+def update_linkedin_status():
+    """Save status for a LinkedIn queue entry back to the CSV."""
+    data = request.get_json()
+    company = data.get("company_name", "")
+    contact = data.get("contact_name", "")
+    status  = data.get("status", "")
+
+    path = data_path("export_linkedin_queue.csv")
+    if not os.path.exists(path):
+        return jsonify({"ok": False, "error": "file not found"}), 404
+
+    rows = read_csv("export_linkedin_queue.csv") or []
+    for row in rows:
+        if row.get("company_name") == company and row.get("contact_name") == contact:
+            row["status"] = status
+            break
+
+    fieldnames = list(rows[0].keys()) if rows else []
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+    return jsonify({"ok": True})
 
 
 # ---------------------------------------------------------------------------
