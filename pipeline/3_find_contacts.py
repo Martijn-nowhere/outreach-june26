@@ -316,32 +316,61 @@ def find_contact_via_bing(company_name: str, website: str, session: requests.Ses
 
 def _apify_search(company_name: str, queries: List[str], session: requests.Session) -> tuple:
     """Run queries via Apify Google Search scraper actor."""
-    import urllib.parse
     all_text = []
     linkedin_urls_found = []
 
     for query in queries:
         try:
-            # Start Apify actor run
-            run_url = "https://api.apify.com/v2/acts/apify~google-search-scraper/run-sync-get-dataset-items"
-            payload = {
-                "queries": query,
-                "maxPagesPerQuery": 1,
-                "resultsPerPage": 8,
-                "languageCode": "nl",
-                "countryCode": "nl",
-            }
-            resp = session.post(
-                run_url,
-                json=payload,
+            # Start actor run (async)
+            run_resp = session.post(
+                "https://api.apify.com/v2/acts/apify~google-search-scraper/runs",
+                json={
+                    "queries": query,
+                    "maxPagesPerQuery": 1,
+                    "resultsPerPage": 8,
+                    "languageCode": "nl",
+                    "countryCode": "nl",
+                },
                 headers={"Authorization": f"Bearer {config.APIFY_API_KEY}"},
-                timeout=60,
+                timeout=30,
             )
-            if resp.status_code != 200:
-                log.warning("  Apify error %d for %s", resp.status_code, company_name)
+            if run_resp.status_code not in (200, 201):
+                log.warning("  Apify run start error %d for %s", run_resp.status_code, company_name)
                 continue
 
-            items = resp.json()
+            run_id = run_resp.json().get("data", {}).get("id", "")
+            if not run_id:
+                continue
+
+            # Poll until finished (max 60s)
+            dataset_id = None
+            for _ in range(12):
+                time.sleep(5)
+                status_resp = session.get(
+                    f"https://api.apify.com/v2/actor-runs/{run_id}",
+                    headers={"Authorization": f"Bearer {config.APIFY_API_KEY}"},
+                    timeout=15,
+                )
+                run_data = status_resp.json().get("data", {})
+                status = run_data.get("status", "")
+                if status == "SUCCEEDED":
+                    dataset_id = run_data.get("defaultDatasetId", "")
+                    break
+                elif status in ("FAILED", "ABORTED", "TIMED-OUT"):
+                    log.warning("  Apify run %s for %s", status, company_name)
+                    break
+
+            if not dataset_id:
+                continue
+
+            # Fetch results
+            items_resp = session.get(
+                f"https://api.apify.com/v2/datasets/{dataset_id}/items",
+                headers={"Authorization": f"Bearer {config.APIFY_API_KEY}"},
+                timeout=15,
+            )
+            items = items_resp.json()
+
             snippets = []
             for item in items:
                 for result in item.get("organicResults", []):
@@ -356,7 +385,7 @@ def _apify_search(company_name: str, queries: List[str], session: requests.Sessi
             if snippets:
                 all_text.append(f"[Query: {query}]\n" + "\n".join(snippets))
 
-            # Fetch top non-LinkedIn result page for more context
+            # Fetch top non-LinkedIn result page
             for item in items:
                 for result in item.get("organicResults", [])[:2]:
                     url = result.get("url", "")
@@ -375,8 +404,6 @@ def _apify_search(company_name: str, queries: List[str], session: requests.Sessi
                         except Exception:
                             pass
                         break
-
-            time.sleep(1)
 
         except Exception as e:
             log.debug("  Apify search error: %s", e)
