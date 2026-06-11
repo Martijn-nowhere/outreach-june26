@@ -141,11 +141,15 @@ martijn@schoolofrecycling.com
 www.schoolofrecycling.com`, school),
 };
 
+function encodeSubject(subject) {
+  return `=?UTF-8?B?${Buffer.from(subject).toString('base64')}?=`;
+}
+
 function buildRawMessage(to, subject, body) {
   const message = [
     `To: ${to}`,
     `From: ${SENDER}`,
-    `Subject: ${subject}`,
+    `Subject: ${encodeSubject(subject)}`,
     `Content-Type: text/plain; charset=utf-8`,
     ``,
     body,
