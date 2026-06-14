@@ -110,13 +110,17 @@ def find_csr_url(company: dict, session: requests.Session) -> Optional[str]:
         "circulair", "maatschappelijk", "planet", "klimaat",
     ]
 
-    # 1. Try URL patterns — also try .com and .co.uk variants for .nl sites
-    alt_bases = [base]
+    # 1. Try URL patterns on the primary domain first, then .com/.co.uk variants
+    alt_bases = []
     if base.endswith(".nl"):
         stem = base[:-3]
         alt_bases += [stem + ".com", stem + "group.com", stem + ".co.uk", stem + "group.co.uk"]
 
-    candidates = [p.format(base=b) for b in alt_bases for p in config.CSR_URL_PATTERNS]
+    # Primary domain patterns first, then alternates (so dirk.nl is tried before dirk.com)
+    primary_candidates = [p.format(base=base) for p in config.CSR_URL_PATTERNS]
+    alt_candidates = [p.format(base=b) for b in alt_bases for p in config.CSR_URL_PATTERNS]
+    candidates = primary_candidates + alt_candidates
+
     for url in candidates:
         resp = try_url(url, session)
         if resp:
@@ -272,9 +276,11 @@ def fetch_content_firecrawl(csr_url: str) -> Tuple[str, str]:
         if resp.status_code == 200:
             data = resp.json()
             text = data.get("data", {}).get("markdown", "") or ""
-            if text.strip():
+            if len(text.strip()) > 200:
                 log.info("  Firecrawl fetched %d chars", len(text))
                 return text[:15000], "html"
+            elif text.strip():
+                log.debug("  Firecrawl returned too little content (%d chars) — skipping", len(text))
     except Exception as e:
         log.debug("  Firecrawl error: %s", e)
     return "", "empty"
