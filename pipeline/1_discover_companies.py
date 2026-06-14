@@ -11,6 +11,7 @@ import time
 import logging
 from pathlib import Path
 
+import re
 import requests
 from bs4 import BeautifulSoup
 
@@ -19,8 +20,110 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import config
 from pipeline._already_in_talks import ALREADY_IN_TALKS
 
+try:
+    import anthropic
+    HAS_ANTHROPIC = True
+except ImportError:
+    HAS_ANTHROPIC = False
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
+
+OWNERSHIP_CHECK_PATTERNS = [
+    "{base}/over-ons",
+    "{base}/about-us",
+    "{base}/about",
+    "{base}/over-ons/bedrijf",
+    "{base}/nl/over-ons",
+]
+
+NON_FAMILY_SIGNALS = [
+    "private equity", "pe ", "buyout", "beursgenoteerd", "stock exchange",
+    "listed on", "genoteerd op", "asahi", "wyndham", "mexichem", "acquisition",
+    "overgenomen door", "acquired by",
+]
+
+
+def verify_ownership_firecrawl(company_name: str, website: str, stated_ownership: str) -> Optional[str]:
+    """
+    Scrape company about page via Firecrawl and ask Claude whether the company
+    is still family/founder-led. Returns stated_ownership if fine, or None to
+    exclude the company (PE/listed/acquired confirmed).
+    """
+    if not config.FIRECRAWL_API_KEY or not HAS_ANTHROPIC or not config.ANTHROPIC_API_KEY or not website:
+        return stated_ownership
+
+    from urllib.parse import urlparse
+    parsed = urlparse(website)
+    base = f"{parsed.scheme}://{parsed.netloc}"
+
+    page_text = ""
+    for pattern in OWNERSHIP_CHECK_PATTERNS:
+        url = pattern.format(base=base)
+        try:
+            resp = requests.post(
+                "https://api.firecrawl.dev/v1/scrape",
+                json={"url": url, "formats": ["markdown"]},
+                headers={
+                    "Authorization": f"Bearer {config.FIRECRAWL_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                timeout=20,
+            )
+            if resp.status_code == 200:
+                text = resp.json().get("data", {}).get("markdown", "") or ""
+                if len(text.strip()) > 300:
+                    page_text = text[:5000]
+                    break
+        except Exception as e:
+            log.debug("  Firecrawl ownership check error for %s: %s", url, e)
+        time.sleep(0.5)
+
+    if not page_text:
+        return stated_ownership
+
+    # Quick keyword check — only call Claude if a red flag is found
+    text_lower = page_text.lower()
+    has_red_flag = any(signal in text_lower for signal in NON_FAMILY_SIGNALS)
+    if not has_red_flag:
+        return stated_ownership
+
+    log.info("  Ownership red flag found for %s — asking Claude...", company_name)
+    client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
+    prompt = f"""Beoordeel of {company_name} nog steeds een familiebedrijf of founder-led bedrijf is op basis van deze websitetekst.
+
+Opgegeven eigendomsstructuur: {stated_ownership}
+
+WEBSITETEKST:
+{page_text}
+
+Antwoord ALLEEN met één van deze JSON-opties:
+{{"verdict": "family", "reason": "korte reden"}}
+{{"verdict": "not_family", "reason": "korte reden (bijv. overgenomen door PE, beursgenoteerd)"}}
+
+Alleen geldige JSON."""
+
+    try:
+        client_obj = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
+        msg = client_obj.messages.create(
+            model=config.CLAUDE_MODEL,
+            max_tokens=100,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = msg.content[0].text.strip()
+        match = re.search(r"\{.*\}", raw, re.DOTALL)
+        if match:
+            result = json.loads(match.group())
+            verdict = result.get("verdict", "family")
+            reason = result.get("reason", "")
+            if verdict == "not_family":
+                log.info("  SKIP %s — not family/founder-led: %s", company_name, reason)
+                return None
+            log.info("  KEEP %s — confirmed: %s", company_name, reason)
+    except Exception as e:
+        log.debug("  Claude ownership check error for %s: %s", company_name, e)
+
+    return stated_ownership
 
 # ---------------------------------------------------------------------------
 # Curated list of Dutch family-owned / founder-led mid-sized companies.
@@ -238,6 +341,24 @@ def run(limit: Optional[int] = None, dry_run: bool = False) -> List[dict]:
     removed = before - len(companies)
     if removed:
         log.info("Removed %d non-family/PE-owned companies", removed)
+
+    # Firecrawl ownership verification — skip companies flagged as PE/listed
+    if config.FIRECRAWL_API_KEY and not dry_run:
+        log.info("Running Firecrawl ownership verification...")
+        verified = []
+        for c in companies:
+            updated = verify_ownership_firecrawl(
+                c["company_name"], c.get("website", ""), c.get("ownership", "")
+            )
+            if updated is None:
+                log.info("  Excluded after ownership check: %s", c["company_name"])
+            else:
+                c["ownership"] = updated
+                verified.append(c)
+        removed_ownership = len(companies) - len(verified)
+        if removed_ownership:
+            log.info("Ownership check removed %d more companies", removed_ownership)
+        companies = verified
 
     if limit:
         companies = companies[:limit]
