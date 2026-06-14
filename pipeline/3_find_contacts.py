@@ -571,6 +571,69 @@ CATCHALL_EMAIL_RE = re.compile(
 )
 
 
+def find_linkedin_via_firecrawl(contact_name: str, website: str) -> Optional[str]:
+    """
+    Scrape company team/about pages via Firecrawl (handles JS rendering) and
+    return a LinkedIn profile URL matching the contact name, or the first
+    linkedin.com/in/ URL found if no name match.
+    """
+    if not config.FIRECRAWL_API_KEY or not website:
+        return None
+
+    base = get_base_url(website)
+    linkedin_re = re.compile(r'https?://(?:www\.)?linkedin\.com/in/[a-zA-Z0-9\-_%]+', re.IGNORECASE)
+    name_parts = [p.lower() for p in contact_name.split() if len(p) > 2] if contact_name else []
+
+    for pattern in TEAM_URL_PATTERNS[:8]:  # limit to first 8 to keep it fast
+        url = pattern.format(base=base)
+        try:
+            resp = requests.post(
+                "https://api.firecrawl.dev/v1/scrape",
+                json={"url": url, "formats": ["markdown", "links"]},
+                headers={
+                    "Authorization": f"Bearer {config.FIRECRAWL_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                timeout=20,
+            )
+            if resp.status_code != 200:
+                continue
+
+            data = resp.json().get("data", {})
+            text = data.get("markdown", "") or ""
+            links = data.get("links", []) or []
+
+            # Collect LinkedIn profile URLs from both text and links list
+            found_urls = linkedin_re.findall(text)
+            for link in links:
+                href = link if isinstance(link, str) else link.get("url", "")
+                if "linkedin.com/in/" in href:
+                    found_urls.append(href.split("?")[0])
+
+            found_urls = list(dict.fromkeys(u.rstrip("/") for u in found_urls))  # dedupe, preserve order
+            if not found_urls:
+                time.sleep(0.3)
+                continue
+
+            # Try to match by name parts
+            if name_parts:
+                for li_url in found_urls:
+                    slug = li_url.split("/in/")[-1].lower()
+                    if any(part in slug for part in name_parts):
+                        log.info("  LinkedIn via Firecrawl (name match): %s", li_url)
+                        return li_url
+
+            # Return first result if we found any (even without name match)
+            log.info("  LinkedIn via Firecrawl (first result): %s", found_urls[0])
+            return found_urls[0]
+
+        except Exception as e:
+            log.debug("  Firecrawl team page error for %s: %s", url, e)
+        time.sleep(0.3)
+
+    return None
+
+
 def find_catchall_email_firecrawl(website: str) -> Optional[str]:
     """
     Scrape the company contact page via Firecrawl and return the first catch-all
@@ -972,7 +1035,15 @@ def run(limit: Optional[int] = None, dry_run: bool = False) -> List[dict]:
                     contacts_found.extend(claude_contacts)
                     log.info("  Claude extracted %d contacts", len(claude_contacts))
 
-            # 4. Enrich contacts without emails using Firecrawl catch-all lookup
+            # 4a. Enrich contacts missing a LinkedIn URL via Firecrawl team page scrape
+            for contact in contacts_found:
+                if not contact.get("linkedin_url") and website and contact.get("contact_name"):
+                    log.info("  Looking up LinkedIn URL via Firecrawl for %s...", contact["contact_name"])
+                    li_url = find_linkedin_via_firecrawl(contact["contact_name"], website)
+                    if li_url:
+                        contact["linkedin_url"] = li_url
+
+            # 4c. Enrich contacts without emails using Firecrawl catch-all lookup
             for contact in contacts_found:
                 if not contact.get("contact_email") and website:
                     catchall = find_catchall_email_firecrawl(website)
