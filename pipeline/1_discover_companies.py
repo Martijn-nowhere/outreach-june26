@@ -165,7 +165,6 @@ SEED_COMPANIES = [
     # --- Construction & Real Estate ---
     {"company_name": "Dura Vermeer", "website": "https://www.duravermeer.nl", "industry": "Construction", "ownership": "family", "hometown": ""},
     {"company_name": "Van Wijnen", "website": "https://www.vanwijnen.nl", "industry": "Construction", "ownership": "family", "hometown": ""},
-    {"company_name": "Volker Wessels", "website": "https://www.volkerwessels.com", "industry": "Construction", "ownership": "family (Wessels)", "hometown": "Amersfoort"},
     {"company_name": "Ter Steege Groep", "website": "https://www.tersteege.nl", "industry": "Construction / Real Estate", "ownership": "family", "hometown": "Rijssen"},
     {"company_name": "Aan de Stegge Twello", "website": "https://www.aandestegge.nl", "industry": "Construction", "ownership": "family", "hometown": "Twello"},
 
