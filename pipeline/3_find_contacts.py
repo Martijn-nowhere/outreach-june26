@@ -554,6 +554,67 @@ def guess_email_patterns(first: str, last: str, domain: str) -> List[Tuple[str, 
     return patterns
 
 
+CATCHALL_URL_PATTERNS = [
+    "{base}/contact",
+    "{base}/contacteer-ons",
+    "{base}/contact-us",
+    "{base}/over-ons/contact",
+    "{base}/about/contact",
+    "{base}/nl/contact",
+    "{base}/en/contact",
+]
+
+CATCHALL_EMAIL_RE = re.compile(
+    r'\b(info|contact|hallo|hello|mail|post|welkom|welcome|algemeen|reach|hi)\b'
+    r'@([a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.(?:[a-zA-Z]{2,}))',
+    re.IGNORECASE,
+)
+
+
+def find_catchall_email_firecrawl(website: str) -> Optional[str]:
+    """
+    Scrape the company contact page via Firecrawl and return the first catch-all
+    email found (info@, contact@, hello@, etc.). Returns None if not found.
+    """
+    if not config.FIRECRAWL_API_KEY or not website:
+        return None
+
+    base = get_base_url(website)
+    domain = get_domain(website)
+
+    for pattern in CATCHALL_URL_PATTERNS:
+        url = pattern.format(base=base)
+        try:
+            resp = requests.post(
+                "https://api.firecrawl.dev/v1/scrape",
+                json={"url": url, "formats": ["markdown"]},
+                headers={
+                    "Authorization": f"Bearer {config.FIRECRAWL_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                timeout=20,
+            )
+            if resp.status_code == 200:
+                text = resp.json().get("data", {}).get("markdown", "") or ""
+                match = CATCHALL_EMAIL_RE.search(text)
+                if match:
+                    email = f"{match.group(1)}@{match.group(2)}".lower()
+                    # Only return if it's on the same domain
+                    if email.endswith(f"@{domain}") or email.endswith(f"@www.{domain}"):
+                        log.info("  Catch-all email via Firecrawl: %s (%s)", email, url)
+                        return email
+                    # Accept any email that contains the domain as a subdomain
+                    email_domain = email.split("@")[1]
+                    if domain in email_domain or email_domain in domain:
+                        log.info("  Catch-all email via Firecrawl: %s (%s)", email, url)
+                        return email
+        except Exception as e:
+            log.debug("  Firecrawl contact page error for %s: %s", url, e)
+        time.sleep(0.5)
+
+    return None
+
+
 def hunter_lookup(company_name: str, domain: str, session: requests.Session) -> List[dict]:
     """Query Hunter.io domain search API."""
     if not config.HUNTER_API_KEY:
@@ -911,23 +972,30 @@ def run(limit: Optional[int] = None, dry_run: bool = False) -> List[dict]:
                     contacts_found.extend(claude_contacts)
                     log.info("  Claude extracted %d contacts", len(claude_contacts))
 
-            # 4. Add email guesses for contacts without emails
+            # 4. Enrich contacts without emails using Firecrawl catch-all lookup
             for contact in contacts_found:
-                # Do NOT guess email patterns — guessed emails bounce and hurt deliverability
-                # Only real emails from Hunter.io are kept
-                pass
+                if not contact.get("contact_email") and website:
+                    catchall = find_catchall_email_firecrawl(website)
+                    if catchall:
+                        contact["contact_email"] = catchall
+                        contact["email_confidence"] = "catch-all"
 
-        # If still no contacts found, create a generic entry
+        # If still no contacts found, try catch-all email as last resort
         if not contacts_found:
             log.warning("  No contacts found for %s", name)
+            catchall_email = find_catchall_email_firecrawl(website) if website else None
             contacts_found = [{
                 "contact_name": "",
-                "contact_title": "Sustainability Manager (not found)",
-                "contact_email": f"sustainability@{domain}" if domain else "",
-                "email_confidence": "generic",
+                "contact_title": "",
+                "contact_email": catchall_email or "",
+                "email_confidence": "catch-all" if catchall_email else "",
                 "linkedin_url": "",
-                "contact_source": "generic fallback",
+                "contact_source": "catch-all fallback" if catchall_email else "not found",
             }]
+            if catchall_email:
+                log.info("  Using catch-all fallback email: %s", catchall_email)
+            else:
+                log.warning("  No email or contact found for %s", name)
 
         # Build final rows
         for contact in contacts_found[:2]:  # max 2 contacts per company

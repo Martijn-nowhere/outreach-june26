@@ -255,11 +255,42 @@ def extract_text_from_html(resp: requests.Response) -> str:
     return text[:15000]  # Cap at 15k chars for API efficiency
 
 
+def fetch_content_firecrawl(csr_url: str) -> Tuple[str, str]:
+    """Fetch page content via Firecrawl API — handles JS, blocks, paywalls."""
+    if not config.FIRECRAWL_API_KEY:
+        return "", "empty"
+    try:
+        resp = requests.post(
+            "https://api.firecrawl.dev/v1/scrape",
+            json={"url": csr_url, "formats": ["markdown"]},
+            headers={
+                "Authorization": f"Bearer {config.FIRECRAWL_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            timeout=30,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            text = data.get("data", {}).get("markdown", "") or ""
+            if text.strip():
+                log.info("  Firecrawl fetched %d chars", len(text))
+                return text[:15000], "html"
+    except Exception as e:
+        log.debug("  Firecrawl error: %s", e)
+    return "", "empty"
+
+
 def fetch_content(csr_url: str, session: requests.Session) -> Tuple[str, str]:
     """
     Fetch content from CSR URL. Returns (text, content_type).
-    content_type: 'pdf', 'html', or 'empty'
+    Uses Firecrawl if available, falls back to direct requests.
     """
+    # PDFs: always fetch directly
+    if not csr_url.lower().endswith(".pdf"):
+        text, ct = fetch_content_firecrawl(csr_url)
+        if text:
+            return text, ct
+
     try:
         resp = session.get(csr_url, headers=HEADERS, timeout=15, allow_redirects=True)
         ct = resp.headers.get("content-type", "")
