@@ -29,36 +29,37 @@ except ImportError:
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
 
-OWNERSHIP_CHECK_PATTERNS = [
+ABOUT_URL_PATTERNS = [
     "{base}/over-ons",
     "{base}/about-us",
     "{base}/about",
-    "{base}/over-ons/bedrijf",
     "{base}/nl/over-ons",
 ]
 
 NON_FAMILY_SIGNALS = [
-    "private equity", "pe ", "buyout", "beursgenoteerd", "stock exchange",
-    "listed on", "genoteerd op", "asahi", "wyndham", "mexichem", "acquisition",
+    "private equity", "buyout", "beursgenoteerd", "stock exchange",
+    "listed on", "genoteerd op", "asahi", "wyndham", "mexichem",
     "overgenomen door", "acquired by",
 ]
 
 
-def verify_ownership_firecrawl(company_name: str, website: str, stated_ownership: str) -> Optional[str]:
+def check_company_fit(company_name: str, website: str, stated_ownership: str) -> bool:
     """
-    Scrape company about page via Firecrawl and ask Claude whether the company
-    is still family/founder-led. Returns stated_ownership if fine, or None to
-    exclude the company (PE/listed/acquired confirmed).
+    Single Firecrawl + Claude check: is this company still a good fit?
+    Criteria: family/founder-owned, not listed, 100–1000 employees.
+
+    Returns True to keep the company, False to exclude.
+    Falls back to True (keep) if Firecrawl/API is unavailable or page can't be fetched.
     """
     if not config.FIRECRAWL_API_KEY or not HAS_ANTHROPIC or not config.ANTHROPIC_API_KEY or not website:
-        return stated_ownership
+        return True
 
     from urllib.parse import urlparse
     parsed = urlparse(website)
     base = f"{parsed.scheme}://{parsed.netloc}"
 
     page_text = ""
-    for pattern in OWNERSHIP_CHECK_PATTERNS:
+    for pattern in ABOUT_URL_PATTERNS:
         url = pattern.format(base=base)
         try:
             resp = requests.post(
@@ -72,40 +73,42 @@ def verify_ownership_firecrawl(company_name: str, website: str, stated_ownership
             )
             if resp.status_code == 200:
                 text = resp.json().get("data", {}).get("markdown", "") or ""
-                if len(text.strip()) > 300:
+                if len(text.strip()) > 200:
                     page_text = text[:5000]
                     break
         except Exception as e:
-            log.debug("  Firecrawl ownership check error for %s: %s", url, e)
-        time.sleep(0.5)
+            log.debug("  Firecrawl fit check error for %s: %s", url, e)
+        time.sleep(0.4)
 
     if not page_text:
-        return stated_ownership
+        return True  # can't verify — keep with benefit of doubt
 
-    # Quick keyword check — only call Claude if a red flag is found
+    # Fast path: no red flags on page → keep without Claude call
     text_lower = page_text.lower()
     has_red_flag = any(signal in text_lower for signal in NON_FAMILY_SIGNALS)
     if not has_red_flag:
-        return stated_ownership
+        return True
 
-    log.info("  Ownership red flag found for %s — asking Claude...", company_name)
+    log.info("  Red flag on page for %s — asking Claude...", company_name)
     client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
-    prompt = f"""Beoordeel of {company_name} nog steeds een familiebedrijf of founder-led bedrijf is op basis van deze websitetekst.
+    prompt = f"""Beoordeel of {company_name} een goede potentiële klant is voor School of Recycling (duurzaamheidseducatie voor medewerkers).
 
-Opgegeven eigendomsstructuur: {stated_ownership}
+Ideale klant: familiebedrijf of founder-led, NIET beursgenoteerd, 100–1000 medewerkers.
+Opgegeven eigendom: {stated_ownership}
 
 WEBSITETEKST:
 {page_text}
 
-Antwoord ALLEEN met één van deze JSON-opties:
-{{"verdict": "family", "reason": "korte reden"}}
-{{"verdict": "not_family", "reason": "korte reden (bijv. overgenomen door PE, beursgenoteerd)"}}
+Geef ALLEEN deze JSON:
+{{"keep": true/false, "reason": "één zin"}}
+
+keep=false alleen als: beursgenoteerd / PE-owned / multinational / te groot (>2000 medewerkers) / NGO/stichting zonder budget.
+Bij twijfel: keep=true.
 
 Alleen geldige JSON."""
 
     try:
-        client_obj = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
-        msg = client_obj.messages.create(
+        msg = client.messages.create(
             model=config.CLAUDE_MODEL,
             max_tokens=100,
             messages=[{"role": "user", "content": prompt}],
@@ -114,16 +117,15 @@ Alleen geldige JSON."""
         match = re.search(r"\{.*\}", raw, re.DOTALL)
         if match:
             result = json.loads(match.group())
-            verdict = result.get("verdict", "family")
+            keep = result.get("keep", True)
             reason = result.get("reason", "")
-            if verdict == "not_family":
-                log.info("  SKIP %s — not family/founder-led: %s", company_name, reason)
-                return None
-            log.info("  KEEP %s — confirmed: %s", company_name, reason)
+            log.info("  %s %s — %s", "KEEP" if keep else "SKIP", company_name, reason)
+            return bool(keep)
     except Exception as e:
-        log.debug("  Claude ownership check error for %s: %s", company_name, e)
+        log.debug("  Claude fit check error for %s: %s", company_name, e)
 
-    return stated_ownership
+    return True
+
 
 # ---------------------------------------------------------------------------
 # Curated list of Dutch family-owned / founder-led mid-sized companies.
@@ -342,23 +344,17 @@ def run(limit: Optional[int] = None, dry_run: bool = False) -> List[dict]:
     if removed:
         log.info("Removed %d non-family/PE-owned companies", removed)
 
-    # Firecrawl ownership verification — skip companies flagged as PE/listed
+    # Firecrawl fit check — family-owned, not listed, 100–1000 employees
     if config.FIRECRAWL_API_KEY and not dry_run:
-        log.info("Running Firecrawl ownership verification...")
-        verified = []
-        for c in companies:
-            updated = verify_ownership_firecrawl(
-                c["company_name"], c.get("website", ""), c.get("ownership", "")
-            )
-            if updated is None:
-                log.info("  Excluded after ownership check: %s", c["company_name"])
-            else:
-                c["ownership"] = updated
-                verified.append(c)
-        removed_ownership = len(companies) - len(verified)
-        if removed_ownership:
-            log.info("Ownership check removed %d more companies", removed_ownership)
-        companies = verified
+        log.info("Running Firecrawl company fit check...")
+        before_fit = len(companies)
+        companies = [
+            c for c in companies
+            if check_company_fit(c["company_name"], c.get("website", ""), c.get("ownership", ""))
+        ]
+        removed_fit = before_fit - len(companies)
+        if removed_fit:
+            log.info("Fit check removed %d companies", removed_fit)
 
     if limit:
         companies = companies[:limit]
