@@ -260,6 +260,11 @@ def run(limit: Optional[int] = None, dry_run: bool = False) -> List[dict]:
     if removed:
         log.info("Removed %d non-family/PE-owned companies", removed)
 
+    # Apply limit BEFORE Firecrawl fit check so testing with --limit 5 is fast
+    if limit:
+        companies = companies[:limit]
+        log.info("Limited to %d companies for this run", limit)
+
     # Firecrawl fit check — family-owned, not listed, 100–1000 employees
     if config.FIRECRAWL_API_KEY and not dry_run:
         log.info("Running Firecrawl company fit check...")
@@ -271,10 +276,6 @@ def run(limit: Optional[int] = None, dry_run: bool = False) -> List[dict]:
         removed_fit = before_fit - len(companies)
         if removed_fit:
             log.info("Fit check removed %d companies", removed_fit)
-
-    if limit:
-        companies = companies[:limit]
-        log.info("Limited to %d companies for this run", limit)
 
     save_companies(companies, config.COMPANIES_CSV)
 
