@@ -82,11 +82,23 @@ def get_base_url(website: str) -> str:
     return f"{parsed.scheme}://{parsed.netloc}"
 
 
+MAINTENANCE_SIGNALS = [
+    "maintenance", "onderhoud", "we'll be back", "we zijn zo terug",
+    "temporarily unavailable", "tijdelijk niet beschikbaar",
+    "coming soon", "under construction", "site is down",
+]
+
+
 def try_url(url: str, session: requests.Session, timeout: int = 8) -> Optional[requests.Response]:
-    """Try fetching a URL, return Response or None."""
+    """Try fetching a URL, return Response or None. Skips maintenance/error pages."""
     try:
         resp = session.get(url, headers=HEADERS, timeout=timeout, allow_redirects=True)
         if resp.status_code == 200 and len(resp.content) > 500:
+            # Reject maintenance/down pages
+            text_lower = resp.text[:2000].lower()
+            if any(signal in text_lower for signal in MAINTENANCE_SIGNALS):
+                log.debug("  Skipping maintenance/down page: %s", url)
+                return None
             return resp
     except Exception:
         pass
