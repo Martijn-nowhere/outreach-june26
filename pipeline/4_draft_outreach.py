@@ -211,6 +211,8 @@ CSR RAPPORT ANALYSE van {company_name}:
 - Noemt plasticreductie/afval: {mentions_plastic}
 - Duurzaamheid kernthema: {mentions_sus}
 
+TAALREGEL: Schrijf VOLLEDIG in het Nederlands. Geen enkele Engelse woorden, ook niet 'would', 'you', 'feel free', etc. Als je in het Engels denkt, vertaal het dan volledig.
+
 SCHRIJF (in het Nederlands):
 
 1. Cold outreach e-mail (max 4 zinnen body, exclusief aanhef/afsluiting):
