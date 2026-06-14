@@ -192,12 +192,56 @@ def find_csr_url(company: dict, session: requests.Session) -> Optional[str]:
 
 def _google_csr_search(company_name: str, session: requests.Session) -> Optional[str]:
     """
-    Google '[Company] sustainability report' and return the first plausible URL.
-    Works across any domain (e.g. .co.uk sister sites, external PDF hosts).
-    Only tries one query to keep runtime short.
+    Search for a company's CSR/sustainability page.
+    Uses Apify Google Search if key is available, falls back to direct Google scraping.
     """
     import urllib.parse
-    query = f'"{company_name}" sustainability report OR "mvo rapport" OR duurzaamheid filetype:pdf OR site:*'
+    query = f'"{company_name}" duurzaamheid OR MVO OR sustainability OR "mvo rapport"'
+
+    # Apify Google Search (no rate limiting)
+    if config.APIFY_API_KEY:
+        try:
+            run_resp = session.post(
+                "https://api.apify.com/v2/acts/apify~google-search-scraper/runs",
+                json={"queries": query, "maxPagesPerQuery": 1, "resultsPerPage": 5,
+                      "languageCode": "nl", "countryCode": "nl"},
+                headers={"Authorization": f"Bearer {config.APIFY_API_KEY}"},
+                timeout=30,
+            )
+            if run_resp.status_code in (200, 201):
+                run_id = run_resp.json().get("data", {}).get("id", "")
+                dataset_id = None
+                for _ in range(12):
+                    time.sleep(5)
+                    status = session.get(
+                        f"https://api.apify.com/v2/actor-runs/{run_id}",
+                        headers={"Authorization": f"Bearer {config.APIFY_API_KEY}"},
+                        timeout=15,
+                    ).json().get("data", {})
+                    if status.get("status") == "SUCCEEDED":
+                        dataset_id = status.get("defaultDatasetId")
+                        break
+                    elif status.get("status") in ("FAILED", "ABORTED", "TIMED-OUT"):
+                        break
+                if dataset_id:
+                    items = session.get(
+                        f"https://api.apify.com/v2/datasets/{dataset_id}/items",
+                        headers={"Authorization": f"Bearer {config.APIFY_API_KEY}"},
+                        timeout=15,
+                    ).json()
+                    for item in items:
+                        for result in item.get("organicResults", []):
+                            url = result.get("url", "")
+                            if url.startswith("http") and any(
+                                kw in url.lower() for kw in
+                                ["sustain", "duurzaam", "csr", "mvo", "rapport", "report", "impact", "planet"]
+                            ):
+                                log.info("  Apify found CSR URL: %s", url)
+                                return url
+        except Exception as e:
+            log.debug("  Apify CSR search error: %s", e)
+
+    # Fallback: direct Google scraping
     try:
         url = "https://www.google.com/search?q=" + urllib.parse.quote(query) + "&num=5"
         resp = session.get(url, headers=HEADERS, timeout=10)

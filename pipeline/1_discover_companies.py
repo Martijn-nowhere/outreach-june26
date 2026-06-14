@@ -138,7 +138,7 @@ Alleen geldige JSON."""
 SEED_COMPANIES = [
     # --- Food & Beverage (family-owned / cooperative roots) ---
     {"company_name": "Dirk van den Broek", "website": "https://www.dirk.nl", "industry": "Retail / Grocery", "ownership": "family", "hometown": "Amsterdam"},
-    {"company_name": "Hessing Supervers", "website": "https://www.hessing.nl", "industry": "Fresh Food / Packaging", "ownership": "family", "hometown": "Woerden"},
+    {"company_name": "Hessing Supervers", "website": "https://www.hessingsupervers.nl", "industry": "Fresh Food / Packaging", "ownership": "family", "hometown": "Woerden"},
     {"company_name": "Agrifirm", "website": "https://www.agrifirm.nl", "industry": "Agriculture / Feed", "ownership": "cooperative", "hometown": "Apeldoorn"},
     {"company_name": "De Heus", "website": "https://www.deheus.com", "industry": "Animal Nutrition", "ownership": "family", "hometown": "Ede"},
     {"company_name": "Vion Food Group", "website": "https://www.vionfoodgroup.com", "industry": "Meat / Food Processing", "ownership": "cooperative", "hometown": ""},
