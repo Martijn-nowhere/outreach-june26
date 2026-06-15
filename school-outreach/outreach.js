@@ -29,12 +29,15 @@ const SENDER_EMAIL = 'martijn@schoolofrecycling.com';
 const COL = {
   SEND: 1,
   SCHOOL: 3,
+  COUNTRY: 6,
   EMAIL: 7,
   E1_SENT: 8,
   E2_SENT: 9,
   E3_SENT: 10,
   STATUS: 11,
 };
+
+const ALLOWED_COUNTRIES = ['Netherlands', 'Belgium'];
 
 const SKIP_STATUSES = ['done', 'bounced', 'unsubscribe', 'niet geïnteresseerd', 'no', 'stop'];
 
@@ -222,6 +225,7 @@ async function main() {
     const row = rows[i];
     const school = row[COL.SCHOOL] || '';
     const email = row[COL.EMAIL] || '';
+    const country = row[COL.COUNTRY] || '';
     const status = (row[COL.STATUS] || '').toLowerCase().trim();
     const sendFlag = (row[COL.SEND] || '').trim();
     const e1Sent = row[COL.E1_SENT] || '';
@@ -229,6 +233,7 @@ async function main() {
     const e3Sent = row[COL.E3_SENT] || '';
 
     if (!email || !school) { skipped++; continue; }
+    if (!ALLOWED_COUNTRIES.includes(country)) { skipped++; continue; }
     if (SKIP_STATUSES.some(s => status.includes(s))) { skipped++; continue; }
 
     if (sendFlag === 'Send' && !e1Sent) {
