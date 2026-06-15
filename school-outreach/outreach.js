@@ -236,7 +236,7 @@ async function main() {
     if (!ALLOWED_COUNTRIES.includes(country)) { skipped++; continue; }
     if (SKIP_STATUSES.some(s => status.includes(s))) { skipped++; continue; }
 
-    if (sendFlag === 'Send' && !e1Sent) {
+    if ((sendFlag === 'Send' || sendFlag === 'YES') && !e1Sent) {
       console.log(`[E1] ${school} <${email}>`);
       const sent = await sendEmail(gmail, email, TEMPLATES.subject1, TEMPLATES.body1(school), log);
       if (sent) {
