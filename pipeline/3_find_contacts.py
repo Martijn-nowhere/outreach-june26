@@ -623,9 +623,8 @@ def find_linkedin_via_firecrawl(contact_name: str, website: str) -> Optional[str
                         log.info("  LinkedIn via Firecrawl (name match): %s", li_url)
                         return li_url
 
-            # Return first result if we found any (even without name match)
-            log.info("  LinkedIn via Firecrawl (first result): %s", found_urls[0])
-            return found_urls[0]
+            # No name match — don't return a random profile, keep looking
+            log.debug("  No name match in %d LinkedIn URLs on %s", len(found_urls), url)
 
         except Exception as e:
             log.debug("  Firecrawl team page error for %s: %s", url, e)
