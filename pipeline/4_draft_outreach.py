@@ -211,7 +211,7 @@ CSR RAPPORT ANALYSE van {company_name}:
 - Noemt plasticreductie/afval: {mentions_plastic}
 - Duurzaamheid kernthema: {mentions_sus}
 
-TAALREGEL: Schrijf VOLLEDIG in het Nederlands. Geen enkele Engelse woorden, ook niet 'would', 'you', 'feel free', etc. Als je in het Engels denkt, vertaal het dan volledig.
+TAALREGEL: Schrijf VOLLEDIG in het Nederlands. VERBODEN woorden: 'would', 'you', 'feel free', 'please', 'I', 'we' (alleen 'wij' mag). Controleer elke zin voordat je die opschrijft.
 
 SCHRIJF (in het Nederlands):
 
